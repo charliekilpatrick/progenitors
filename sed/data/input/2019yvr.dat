@@ -1,0 +1,22 @@
+# %ECSV 0.9
+# ---
+# datatype:
+# - {name: MJD, datatype: string}
+# - {name: Instrument, datatype: string}
+# - {name: Filter, datatype: string}
+# - {name: Exposure, datatype: float64}
+# - {name: Magnitude, datatype: float64}
+# - {name: Uncertainty, datatype: float64}
+# meta: !!omap
+# - {name: 2019yvr}
+# - {ra: 191.283872323}
+# - {dec: -0.459107105959}
+# - {distance: 14.4}
+# - {dist_error: 1.4}
+# - {discovery_date: 2019-12-27T12:30:14.000}
+# schema: astropy-2.0
+MJD Instrument Filter Exposure Magnitude Uncertainty
+----------- WFC3/UVIS F438W 3420.0 26.1382 0.1622
+----------- WFC3/UVIS F555W 5886.0 25.3512 0.0319
+----------- WFC3/UVIS F625W 5682.0 24.8971 0.0221
+----------- WFC3/UVIS F814W 3456.0 24.2533 0.0319

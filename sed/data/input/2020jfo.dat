@@ -1,0 +1,36 @@
+# %ECSV 0.9
+# ---
+# datatype:
+# - {name: MJD, datatype: string}
+# - {name: Instrument, datatype: string}
+# - {name: Filter, datatype: string}
+# - {name: Exposure, datatype: float64}
+# - {name: Magnitude, datatype: float64}
+# - {name: Uncertainty, datatype: float64}
+# - {name: Use, datatype: int}
+# meta: !!omap
+# - {name: 2020jfo}
+# - {ra: 185.460333 }
+# - {dec: 4.481681 }
+# - {distance: 12.3}
+# - {dist_error: 1.8}
+# - {magsystem: ab}
+# schema: astropy-2.0
+MJD         Instrument   Filter Exposure Magnitude Uncertainty Use
+50157.9519  WFPC2        F218W  1200.0   26.32     0.00        0
+49509.8033  WFPC2        F606W  160.0    25.96     0.00        1
+52116.0901  WFPC2        F450W  460.0    25.93     0.00        0
+52116.1005  WFPC2        F814W  460.0    25.74     0.28        1
+56071.1848  ACS/WFC      F435W  1090.0   27.11     0.00        0
+56071.2446  ACS/WFC      F814W  1090.0   25.62     0.08        1
+58580.8248  ACS/WFC      F814W  2112.0   25.96     0.07        0
+58937.7364  WFC3/UVIS    F438W  1050.0   26.60     0.00        0
+58937.7423  WFC3/UVIS    F336W  1110.0   26.66     0.00        0
+58937.7656  WFC3/UVIS    F275W  2190.0   27.00     0.00        0
+58937.7315  WFC3/UVIS    F814W  803.0    25.58     0.08        1
+58937.7758  WFC3/UVIS    F555W  670.0    26.90     0.00        1
+----------- Spitzer/IRAC Ch1    15726.0  24.85     0.28        1
+----------- Spitzer/IRAC Ch2    18372.4  25.01     0.25        1
+----------- Spitzer/IRAC Ch3    1098.8   21.50     0.00        1
+----------- Spitzer/IRAC Ch4    696.8    22.22     0.00        1
+

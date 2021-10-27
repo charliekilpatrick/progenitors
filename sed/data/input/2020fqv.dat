@@ -1,0 +1,27 @@
+# %ECSV 0.9
+# ---
+# datatype:
+# - {name: MJD, datatype: string}
+# - {name: Instrument, datatype: string}
+# - {name: Filter, datatype: string}
+# - {name: Exposure, datatype: float64}
+# - {name: Magnitude, datatype: float64}
+# - {name: Uncertainty, datatype: float64}
+# meta: !!omap
+# - {name: 2020fqv}
+# - {ra: 189.1385809 }
+# - {dec: 11.2316527}
+# - {distance: 17.3}
+# - {dist_error: 3.6}
+# - {discovery_date: 2020-03-31T08:06:00.000}
+# schema: astropy-2.0
+MJD Instrument Filter Exposure Magnitude Uncertainty
+----------- WFPC2        F606W 160.0 24.80182 0.000
+----------- PS1/GPC1     g     200.0 20.79620 0.000
+----------- PS1/GPC1     r     200.0 20.47770 0.000
+----------- PS1/GPC1     i     200.0 20.35660 0.000
+----------- PS1/GPC1     z     200.0 20.32350 0.000
+----------- PS1/GPC1     y     200.0 20.05440 0.000
+----------- Spitzer/IRAC Ch1   10000.0 22.74717 0.000
+----------- Spitzer/IRAC Ch2   10000.0 23.09680 0.000
+
