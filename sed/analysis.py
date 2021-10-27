@@ -1,9 +1,10 @@
 """
     SED Fitter by C.D. Kilpatrick
 
-    Takes an input data table of HST photometry and compares to MIST stellar
-    evolution tracks, blackbodies, Pickles stellar SEDs, and BPASS models.
-    Will run emcee to infer physical parameters of stellar systems.
+    Takes an input data table of photometry and compares to MIST stellar
+    evolution tracks, blackbodies, Pickles stellar SEDs, BPASS models, and a
+    red supergiant model from Kilpatrick & Foley (2018).
+    Uses emcee to infer physical parameters of stellar systems from photometry.
 """
 import warnings
 warnings.filterwarnings('ignore')
@@ -24,10 +25,11 @@ import pickle
 import astropy
 import progressbar
 import numpy as np
+import argparse
 
-# Other external dependencies
-from constants import *
-from utilities import *
+# Dependencies from this repo
+import constants
+import utilities
 import dust
 
 import pysynphot as S
@@ -49,18 +51,19 @@ class sed_fitter(object):
     def __init__(self, verbose=True, interpolate=True):
 
         # Make sure dustmap is initialized
-        import_dustmap()
+        utilities.import_dustmap()
 
         self.filename = ''
 
-        # Handle file and directory structure
+        # Handle file and directory structure for interpolated data and model
+        # data from pickles, mist
         self.files = {
                 'pickles': {'input': 'pickles.dat',
-                            'interp': 'pickles.pkl'},
-                'rsg': {'interp': 'rsg.pkl'},
+                            'interp': 'interpolate/pickles.pkl'},
+                'rsg': {'interp': 'interpolate/rsg.pkl'},
                 'mist': {'suffix': {'cmd': 'M.track.eep.cmd',
                                     'theoretical':'M.track.eep'}},
-                'blackbody':{'file':'blackbody.pkl'},
+                'blackbody':{'interp':'interpolate/blackbody.pkl'},
                 'extinction':{'file':'extinction'}
         }
 
@@ -324,8 +327,9 @@ class sed_fitter(object):
 
         # Parse coord from table metadata
         if 'ra' in table.meta.keys() and 'dec' in table.meta.keys():
-            self.coord = parse_coord(table.meta['ra'], table.meta['dec'])
-            sfd = get_sfd()
+            self.coord = utilities.parse_coord(table.meta['ra'],
+                table.meta['dec'])
+            sfd = utilities.get_sfd()
             self.mw_ebv = sfd(self.coord)
 
         # Set mag system if it is in photometry table.  AB mag is preferred
@@ -343,8 +347,8 @@ class sed_fitter(object):
             self.phottable.rename_column(key, key.lower())
 
         # Rename common alternatives into standard column names
-        for key in alternate_names.keys():
-            for val in alternate_names[key]:
+        for key in constants.alternate_names.keys():
+            for val in constants.alternate_names[key]:
                 if val in self.phottable.keys():
                     self.phottable.rename_column(val, key)
 
@@ -374,13 +378,13 @@ class sed_fitter(object):
         # Sort table and get list of Rv values to apply for MW extinction
         self.phottable.sort('filter')
         newdict={}
-        for key in sf11rv.keys():
-            newdict[key.upper()]=sf11rv[key]
-        sf11rv.update(newdict)
+        for key in constants.sf11rv.keys():
+            newdict[key.upper()]=constants.sf11rv[key]
+        constants.sf11rv.update(newdict)
 
         for row in self.phottable:
             inst_filt = self.get_inst_filt(row)
-            self.rv.append(sf11rv[inst_filt])
+            self.rv.append(constants.sf11rv[inst_filt])
 
         return(self.phottable)
 
@@ -407,7 +411,7 @@ class sed_fitter(object):
                 10**np.max(logTval)))
 
         # Unpickle model mag function if it already exists
-        bbfile = self.dirs['data']+self.files['blackbody']['file']
+        bbfile = self.dirs['data']+self.files['blackbody']['interp']
         if os.path.exists(bbfile):
             models = pickle.load(open(bbfile, 'rb'))
             # Remove inst_filt pairs that we don't need to calculate
@@ -489,7 +493,7 @@ class sed_fitter(object):
 
             # Normalize the spectrum so it integrates to 1 over range
             scale = 1./integrate.simps(sp0.flux, sp0.wave)
-            sp0 = sp0 * scale * PICKLES_CONST
+            sp0 = sp0 * scale * constants.PICKLES_CONST
 
             spectra.append(sp0)
 
@@ -727,7 +731,7 @@ class sed_fitter(object):
         bb = S.BlackBody(temp)
         bb.convert('fnu')
 
-        scale = BB_SCALE/temp**4 * 10**lum
+        scale = constants.BB_SCALE/temp**4 * 10**lum
         bb = scale * bb
 
         return(bb)
@@ -1217,7 +1221,7 @@ class sed_fitter(object):
 
         out_fmt = '{0}: {1} + {2} - {3}'
 
-        mcmc = round_to_n(params[best], n)
+        mcmc = utilities.round_to_n(params[best], n)
         digits = int(np.ceil(np.log10(mcmc)))
         decimal_place = -1 * (digits - n)
         if float(mcmc)==int(mcmc) and decimal_place < 1:
