@@ -26,6 +26,7 @@ import astropy
 import progressbar
 import numpy as np
 import argparse
+import time
 
 # Dependencies from this repo
 import constants
@@ -54,6 +55,8 @@ class sed_fitter(object):
         utilities.import_dustmap()
 
         self.filename = ''
+
+        self.usagestring = 'analysis.py objname model'
 
         # Handle file and directory structure for interpolated data and model
         # data from pickles, mist
@@ -183,6 +186,31 @@ class sed_fitter(object):
 
         # For BPASS or other models that use Vega mag units
         self.ab_to_vega = {}
+
+    def add_options(self, parser=None, usage=None):
+        import argparse
+        if parser == None:
+            parser = argparse.ArgumentParser(usage=usage,
+                conflict_handler='resolve')
+        parser.add_argument('objname', type=str,
+            help='Object name to analyze.  Must have a phot file in input dir')
+        parser.add_argument('model', type=str,
+            help='Type of model to fit to object '+\
+            '[blackbody|pickles|mist|bpass|rsg]')
+        parser.add_argument('--niter','-n', type=int, default=1,
+            help='Number of iterations over which to perform emcee')
+        parser.add_argument('--nsteps', type=int, default=500,
+            help='Number of steps to perform with emcee')
+        parser.add_argument('--nwalkers', type=int, default=1000,
+            help='Number of walkers to pass to emcee')
+        parser.add_argument('--extinction', default=False, action='store_true',
+            help='Use an input extinction file as opposed to assuming '+\
+            'the host extinction value in the photometry file')
+        parser.add_argument('--sigma', type=float, default=1.0,
+            help='Vary the initial parameter guesses for each walker by'+\
+            'best guess * np.random.lognormal(1.0, sigma)')
+
+        return(parser)
 
     def set_model_type(self, model_type, extinction=False):
         self.model_type = model_type
@@ -1151,9 +1179,9 @@ class sed_fitter(object):
 
         return(guess)
 
-    def get_init_pos(self, guess, ndim, nwalkers, exp_var=0, method='random'):
+    def get_init_pos(self, guess, ndim, nwalkers, sigma=1, method='random'):
 
-        init_pos = [guess * 10**(10**(exp_var - 0.5)*np.random.randn(ndim))
+        init_pos = [guess * np.random.lognormal(1.0, sigma, ndim)
             for i in range(nwalkers)]
 
         return(init_pos)
@@ -1219,7 +1247,7 @@ class sed_fitter(object):
         best = np.argmin(prob)
         n = int(self.significant_figures)
 
-        out_fmt = '{0}: {1} + {2} - {3}'
+        out_fmt = '{0:<12}: {1:>10} + {2:>10} - {3:>10}'
 
         mcmc = utilities.round_to_n(params[best], n)
         digits = int(np.ceil(np.log10(mcmc)))
@@ -1247,8 +1275,12 @@ class sed_fitter(object):
 
         return(params[best])
 
-    def run_emcee(self, phottable, exp_var=0, nsteps=5000, nwalkers=100,
+    def run_emcee(self, phottable, sigma=1.0, nsteps=5000, nwalkers=100,
         guess_type='params'):
+
+        # Indicate start of mcmc iteration
+        model_type = self.model_type
+        self.make_banner(f'Starting MCMC for {model_type}')
 
         # This returns an absolute magnitude and colors for comparison for
         # the model data.  In this way, we can avoid over-estimating the
@@ -1276,7 +1308,7 @@ class sed_fitter(object):
             print('Current number of iterations on backend:',backend.iteration)
             init_pos = backend.get_last_sample()
         else:
-            init_pos = self.get_init_pos(guess, ndim, nwalkers, exp_var=exp_var)
+            init_pos = self.get_init_pos(guess, ndim, nwalkers, sigma=sigma)
 
         # Construct emcee sampler with parameters derived above
         sampler = emcee.EnsembleSampler(nwalkers, ndim, self.log_likelihood,
@@ -1295,7 +1327,7 @@ class sed_fitter(object):
         if self.verbose:
             print('Current number of samples in backend:', len(sample))
             mask = ~np.isinf(prob)
-            print('Minimum chi^2 is:',-1.0*np.max(prob))
+            print('Minimum chi^2 is:','%.4f'%(-1.0*np.max(prob)))
             print('\n\n')
         params = [] ; blobs = []
         for i,param in enumerate(self.model_fit_params):
@@ -1307,8 +1339,8 @@ class sed_fitter(object):
 
         if self.distance[1]!=0.0:
             logL_unc = 2 * self.distance[1]/self.distance[0]
-            print('Additional uncertainty on log_L:',logL_unc)
-            print('Fractional uncertainty on log_R:',logL_unc/2)
+            print('Additional uncertainty on log_L:','%.4f'%logL_unc)
+            print('Fractional uncertainty on log_R:','%.4f'%(logL_unc/2))
 
         # Calculate photospheric radius from best-fitting model params
         if ('luminosity' in self.model_fit_params and
@@ -1322,6 +1354,8 @@ class sed_fitter(object):
             radius = np.sqrt(lum / temp**4)
 
             r=self.calculate_param_best_fit(radius, prob, ndim, 'radius')
+
+        print('\n\n')
 
         if not blobs and self.host_ext:
             blobs = self.host_ext
@@ -1486,37 +1520,62 @@ class sed_fitter(object):
             self.extinction['function'][key] = interpolate.interp2d(Rv, Av,
                 extinction_grid[key], kind='cubic', bounds_error=False)
 
-    def print_model_results(self, inst_filt, model, mag, magerr, theta, blobs):
+    def print_model_results(self, inst_filt, model, mag, magerr, theta, blobs,
+        outtype=''):
 
         chi2, Av, Rv = self.log_likelihood(theta, inst_filt, mag, magerr,
             extinction=blobs)
 
-        print('\n\nModel Type:', self.model_type)
+        model_type = self.model_type
+        if outtype=='initial':
+            self.make_banner(f'Current best fit for: {model_type}')
+
         print('Input model parameters:')
-        outparams = ' '.join(self.model_fit_params)+': '
-        outparams += '('+' '.join([str(s) for s in theta])+')'
-        print(outparams)
+        for name,par in zip(self.model_fit_params, theta):
+            par = '%4.4f'%float(par)
+            print(f'{name} = {par}')
+
         if self.model_fit_blobs:
-            outblobs = ' '.join(self.model_fit_blobs)+': '
-            outblobs += '('+' '.join([str(s) for s in blobs])+')'
-            print(outblobs)
-        print('Model mag:',model)
-        print('Input mag:',mag)
-        print('Input magnitude error:', magerr)
-        print('Model - Input mag:', model-mag)
-        print('chi^2:', (model-mag)**2/magerr**2)
+            print('Input host extinction:')
+            for name,par in zip(self.model_fit_blobs, blobs):
+                par = '%4.5f'%par
+                print(f'{name} = {par}')
+
+        print('Av =', Av)
+        print('Rv =', Rv)
+        print('\n\n')
+
+        # format output for each observation
+
+        print('Model fit by observation:')
+        fmt = '{inst:<20} {mag:<8} {err:<7} {model:<9} {chi:<12}'
+        print(fmt.format(inst='INST_FILT',mag='MAG',err='MAGERR',model='MODEL',
+            chi='CHI2'))
+        for val in zip(inst_filt, mag, magerr, model):
+            if float(val[2])!=0.0:
+                chi=((val[1]-val[3])**2/val[2]**2)
+                if chi>1.0e7:
+                    chi='{:e}'.format(chi)
+                else:
+                    chi='%7.4f'%chi
+            elif val[3] < val[1]:
+                chi='inf'
+            else:
+                chi='nan'
+            print(fmt.format(inst=val[0], mag='%2.4f'%float(val[1]),
+                err='%.4f'%float(val[2]), model='%2.4f'%float(val[3]),
+                chi=chi))
+
         if self.extinction['likelihood']:
             value = np.asscalar(self.extinction['interpolation'](Av, Rv))
-            print('Extinction chi^2:', value)
-        elif np.isinf(chi2):
+            print('Total Extinction chi^2:', value)
+
+        if np.isinf(chi2):
             print('Sum chi^2: inf')
         elif isinstance(chi2, float):
             print('Sum chi^2: {0}'.format('%7.4f'%chi2))
         else:
             print('Sum chi^2:', np.asscalar(-1.0*chi2))
-        print('Av:', Av)
-        print('Rv:', Rv)
-        print('\n\n')
 
     def get_wavelength_widths(self, spectrum, bandpasses):
 
@@ -1529,16 +1588,55 @@ class sed_fitter(object):
 
         return(np.array(wave), np.array(width))
 
+    # Make sure all standard output is formatted in the same way with banner
+    # messages for each module
+    def make_banner(self, message):
+        print('\n\n'+message+'\n'+'#'*80+'\n'+'#'*80+'\n\n')
+
+    def parse_photfile(self, objname):
+        filename = objname+'.dat'
+        if os.path.exists(filename):
+            return(filename)
+        elif os.path.exists(self.dirs['input']+filename):
+            return(self.dirs['input']+filename)
+        else:
+            return(None)
 
 def main():
+    # Start timer, create sed_fitter instance
+    start = time.time()
     sed = sed_fitter()
-    photfile = sed.dirs['input']+'2020jfo.dat'
-    run_models = ['rsg']*5
+
+    # Handle the --help option
+    if '-h' in sys.argv or '--help' in sys.argv:
+        parser = sed.add_options(usage=sed.usagestring)
+        options = parser.parse_args()
+        sys.exit()
+
+    # Starting banner
+    sed.command = ' '.join(sys.argv)
+    sed.make_banner('Starting: {cmd}'.format(cmd=sed.command))
+
+    parser = sed.add_options(usage=sed.usagestring)
+    opt = parser.parse_args()
+
+    photfile = sed.parse_photfile(opt.objname)
+    if not photfile or not os.path.exists(photfile):
+        inpfile = sys.argv[1]
+        print(f'ERROR: input photfile {inpfile} does not exist!  Exiting...')
+        sys.exit(1)
+
+    if opt.model not in list(model_fit_params.keys()):
+        model = opt.model
+        print(f'ERROR: model type {model} not allowed!  Exiting...')
+        sys.exit(1)
+
+    run_models = [opt.model]*opt.niter
     for model in run_models:
 
         # Set model type and import photometry table, bandpasses
         # Input host extinction in (Av,Rv)
-        sed.set_model_type(model, extinction=False)
+        sed.set_model_type(model, extinction=opt.extinction)
         sed.phottable = sed.import_phottable(photfile)
         mjd, inst_filt, mag, magerr = sed.get_fit_parameters(sed.phottable)
         bandpasses = [sed.inst_filt_to_bandpass(i) for i in inst_filt]
@@ -1556,16 +1654,17 @@ def main():
         # Get an initial guess for the model parameter values and compute the
         # model magnitudes and chi^2 for those model parameters
         theta = sed.get_guess(model, guess_type='params')
-        #ext = sed.get_guess(model, guess_type='blobs')
         ext = sed.host_ext
         model, Av, Rv = sed.compute_model_mag(inst_filt, theta, extinction=ext)
         chi2, Av, Rv = sed.log_likelihood(theta, inst_filt, mag, magerr,
             extinction=ext)
 
-        sed.print_model_results(inst_filt, model, mag, magerr, theta, ext)
+        sed.print_model_results(inst_filt, model, mag, magerr, theta, ext,
+            outtype='initial')
 
         # Run the MCMC
-        sed.run_emcee(sed.phottable, exp_var=0.2, nsteps=500, nwalkers=1000)
+        sed.run_emcee(sed.phottable, sigma=opt.sigma, nsteps=opt.nsteps,
+            nwalkers=opt.nwalkers)
 
 if __name__ == "__main__":
     main()
