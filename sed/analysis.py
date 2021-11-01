@@ -120,7 +120,7 @@ class sed_fitter(object):
         self.metallicity = 0.014 # Metallicity in terms of Z
 
         # Distance and uncertainty in Mpc
-        self.distance = (17.3, 3.6)
+        self.distance = [12.3, 1.8]
         self.dm = 5.0 * np.log10(self.distance[0]) + 25.0
 
         # For extinction likelihood values to use as a prior for modeling
@@ -240,6 +240,7 @@ class sed_fitter(object):
     def load_extinction(self, fromfile='', val=None):
 
         extdir = self.dirs['extinction']
+        # Files should be formatted following extinction ipynb
         if fromfile:
             self.extinction_model=True
             chifile = extdir+fromfile+'_chi.npy'
@@ -264,14 +265,38 @@ class sed_fitter(object):
 
         elif val:
             self.extinction_model=False
-            self.host_ext=val
-            # Assume val is formatted as (Av,Rv)
+            self.host_ext=val # Input val must be formatted as (Av,Rv)
             mjd,inst_filt,mag,magerr = self.get_fit_parameters(self.phottable)
             bandpasses = [self.inst_filt_to_bandpass(i) for i in inst_filt]
 
             for i,bp in zip(inst_filt,bandpasses):
                 self.host_ext_inst_filt[i]=self.calculate_extinction(val[0],
                     val[1], bp)
+
+        elif (self.phottable and 'host_ebv' in self.phottable.meta.keys() and
+            'host_rv' in self.phottable.meta.keys()):
+
+            ebv = self.phottable.meta['host_ebv']
+            rv = self.phottable.meta['host_rv']
+
+            val = (ebv*rv, rv)
+
+            self.extinction_model = False
+            self.host_ext=val
+
+            mjd,inst_filt,mag,magerr = self.get_fit_parameters(self.phottable)
+            bandpasses = [self.inst_filt_to_bandpass(i) for i in inst_filt]
+
+            for i,bp in zip(inst_filt,bandpasses):
+                self.host_ext_inst_filt[i]=self.calculate_extinction(val[0],
+                    val[1], bp)
+
+        # Default just set host extinction to zero
+        else:
+            val = (0.0, 0.0)
+            mjd,inst_filt,mag,magerr = self.get_fit_parameters(self.phottable)
+            for i in inst_filt:
+                self.host_ext_inst_filt[i]=0.0
 
     # Cardelli et al. extinction law.  Given input wavelength, Av, Rv, then
     # outputs a pysynphot spectrum with relative extinction versus wavelength
@@ -366,6 +391,11 @@ class sed_fitter(object):
             if 'ab' in system.lower(): self.magsystem = 'abmag'
             if 'vega' in system.lower(): self.magsystem = 'vegamag'
             if 'st' in system.lower(): self.magsystem = 'stmag'
+
+        if 'distance' in table.meta.keys():
+            self.distance[0] = float(table.meta['distance'])
+        if 'dist_error' in table.meta.keys():
+            self.distance[1] = float(table.meta['dist_error'])
 
         self.phottable = table
         self.filename = filename
@@ -1338,7 +1368,8 @@ class sed_fitter(object):
             blobs.append(b)
 
         if self.distance[1]!=0.0:
-            logL_unc = 2 * self.distance[1]/self.distance[0]
+            print('Distance: ',self.distance[0],'+/-',self.distance[1])
+            logL_unc = 2.17 * self.distance[1]/self.distance[0]
             print('Additional uncertainty on log_L:','%.4f'%logL_unc)
             print('Fractional uncertainty on log_R:','%.4f'%(logL_unc/2))
 
@@ -1364,7 +1395,7 @@ class sed_fitter(object):
             extinction=blobs)
 
         self.print_model_results(inst_filt, model_mag, mag, magerr, params,
-            blobs)
+            blobs, mjd)
 
     # Check bounds for input model parameters
     def check_bounds(self, theta):
@@ -1521,7 +1552,7 @@ class sed_fitter(object):
                 extinction_grid[key], kind='cubic', bounds_error=False)
 
     def print_model_results(self, inst_filt, model, mag, magerr, theta, blobs,
-        outtype=''):
+         mjd, outtype=''):
 
         chi2, Av, Rv = self.log_likelihood(theta, inst_filt, mag, magerr,
             extinction=blobs)
@@ -1548,21 +1579,21 @@ class sed_fitter(object):
         # format output for each observation
 
         print('Model fit by observation:')
-        fmt = '{inst:<20} {mag:<8} {err:<7} {model:<9} {chi:<12}'
-        print(fmt.format(inst='INST_FILT',mag='MAG',err='MAGERR',model='MODEL',
-            chi='CHI2'))
-        for val in zip(inst_filt, mag, magerr, model):
+        fmt = '{mjd:<12} {inst:<20} {mag:<8} {err:<7} {model:<9} {chi:>10}'
+        print(fmt.format(mjd='MJD', inst='INST_FILT',mag='MAG',err='MAGERR',
+            model='MODEL',chi='CHI2'))
+        for val in zip(inst_filt, mag, magerr, model, mjd):
             if float(val[2])!=0.0:
                 chi=((val[1]-val[3])**2/val[2]**2)
-                if chi>1.0e7:
-                    chi='{:e}'.format(chi)
+                if chi>1.0e5:
+                    chi='{:4e}'.format(chi)
                 else:
-                    chi='%7.4f'%chi
+                    chi='%5.4f'%chi
             elif val[3] < val[1]:
                 chi='inf'
             else:
                 chi='nan'
-            print(fmt.format(inst=val[0], mag='%2.4f'%float(val[1]),
+            print(fmt.format(mjd=val[4], inst=val[0], mag='%2.4f'%float(val[1]),
                 err='%.4f'%float(val[2]), model='%2.4f'%float(val[3]),
                 chi=chi))
 
@@ -1642,8 +1673,9 @@ def main():
         bandpasses = [sed.inst_filt_to_bandpass(i) for i in inst_filt]
 
         # Load extinction priors
-        # Calculate a grid of extinction values for the input model parameters
-        sed.load_extinction(val=(0.186, 3.1))
+        # This can be done with input E(B-V) and Rv values for the host or by
+        # calculating a grid of extinction values for the input model parameters
+        sed.load_extinction()
         #sed.calculate_extinction_grid(inst_filt)
         sed.load_models(sed.phottable)
 
@@ -1659,7 +1691,7 @@ def main():
         chi2, Av, Rv = sed.log_likelihood(theta, inst_filt, mag, magerr,
             extinction=ext)
 
-        sed.print_model_results(inst_filt, model, mag, magerr, theta, ext,
+        sed.print_model_results(inst_filt, model, mag, magerr, theta, ext, mjd,
             outtype='initial')
 
         # Run the MCMC

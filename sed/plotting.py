@@ -59,6 +59,35 @@ class sed_plot(object):
             'mass_ratio': 'q',
         }
 
+        self.plot_types = {
+            'hr': self.hr,
+            'sed': self.plot_sed,
+            'cmd': self.cmd,
+            'corner': self.plot_corner,
+            'lightcurve': self.lightcurve,
+        }
+
+        self.usagestring = 'plotting.py objname type'
+
+    def add_options(self, parser=None, usage=None):
+        import argparse
+        if parser == None:
+            parser = argparse.ArgumentParser(usage=usage,
+                conflict_handler='resolve')
+        parser.add_argument('objname', type=str,
+            help='Object name to analyze.  Must have a phot file in input dir')
+        parser.add_argument('type', type=str,
+            help='Types of models to show, can be comma-separated to show '+\
+            'multiple models [blackbody|pickles|mist|bpass|rsg]')
+        parser.add_argument('model', type=str,
+            help='Types of plot to make, can be comma-separated to make '+\
+            'multiple plots [hr|sed|cmd|corner|lightcurve]')
+
+        return(parser)
+
+    def make_banner(self, message):
+        print('\n\n'+message+'\n'+'#'*80+'\n'+'#'*80+'\n\n')
+
     def create_flux_title(self, power):
         flux_fmt = r'$_{\lambda}$'+' [10'+r'$^{'+str(power)+'}$'
         flux = '{0}{1} {2}]'
@@ -87,7 +116,7 @@ class sed_plot(object):
         self.fit.backend = self.fit.load_backend(model, self.fit.phottable)
 
 
-    def plot_sed(self, models, fluxspace=True, extinction=False):
+    def plot_sed(self, models, fluxspace=True, extinction=False, **kwargs):
 
         phot = self.fit.phottable
         dum, inst_filt, mag, magerr = self.fit.get_fit_parameters(phot)
@@ -297,7 +326,7 @@ class sed_plot(object):
 
     def hr(self, mode='single', progenitors='progenitors.dat',
         add_progenitors=True,add_yoon=False,add_lbvs=False,add_data=True,
-        add_rsg=False,limits=False):
+        add_rsg=False,limits=False, **kwargs):
 
         fig, ax = self.setup_plot()
         self.setup_axis_titles(ax, 'log_T', 'log_L')
@@ -507,7 +536,6 @@ class sed_plot(object):
                     grid=np.zeros((gsize[0], gsize[1]))
                     lum_space = np.linspace(ylim[0], ylim[1], gsize[1])
                     tem_space = np.linspace(xlim[0], xlim[1], gsize[0])
-                    print(ylim,xlim)
                     for ii,temp in enumerate(tem_space):
                         for jj,lum in enumerate(lum_space):
                             model,Av,Rv = self.fit.compute_model_mag(inst_filt,
@@ -515,14 +543,8 @@ class sed_plot(object):
                             if any([mmag>nmag for mmag,nmag in zip(mag,model)]):
                                 grid[ii,jj]=1
 
-                    print(len(np.where(grid==0)[0]))
-                    print(len(np.where(grid==1)[0]))
-
                     vals=np.where(grid==1)
                     idx=np.argmin(vals[1])
-                    print(idx)
-                    print(vals[1][idx])
-                    print(tem_space[vals[0][idx]],lum_space[vals[1][idx]])
 
                     levels = np.linspace(0, 1, ncols)
 
@@ -566,7 +588,7 @@ class sed_plot(object):
 
     def cmd(self, bands, mode='single', progenitors='progenitors.dat',
         add_progenitors=True,add_yoon=False,add_lbvs=False,add_data=True,
-        add_rsg=False,limits=False):
+        add_rsg=False,limits=False, **kwargs):
 
         fig, ax = self.setup_plot()
         self.setup_axis_titles(ax, 'log_T', 'log_L')
@@ -782,7 +804,6 @@ class sed_plot(object):
                     grid=np.zeros((gsize[0], gsize[1]))
                     lum_space = np.linspace(ylim[0], ylim[1], gsize[1])
                     tem_space = np.linspace(xlim[0], xlim[1], gsize[0])
-                    print(ylim,xlim)
                     for ii,temp in enumerate(tem_space):
                         for jj,lum in enumerate(lum_space):
                             model,Av,Rv = self.fit.compute_model_mag(inst_filt,
@@ -790,14 +811,8 @@ class sed_plot(object):
                             if any([mmag>nmag for mmag,nmag in zip(mag,model)]):
                                 grid[ii,jj]=1
 
-                    print(len(np.where(grid==0)[0]))
-                    print(len(np.where(grid==1)[0]))
-
                     vals=np.where(grid==1)
                     idx=np.argmin(vals[1])
-                    print(idx)
-                    print(vals[1][idx])
-                    print(tem_space[vals[0][idx]],lum_space[vals[1][idx]])
 
                     levels = np.linspace(0, 1, ncols)
 
@@ -875,7 +890,7 @@ class sed_plot(object):
         ax.set_xlabel(xname, labelpad=self.pad)
         ax.set_ylabel(yname, labelpad=self.pad)
 
-    def lightcurve(self, sed, plot_title=''):
+    def lightcurve(self, sed, plot_title='', **kwargs):
 
         phot = sed.phottable
         magunit = sed.magsystem.replace('mag','').upper().strip()
@@ -916,7 +931,7 @@ class sed_plot(object):
 
         self.close_plot(plot_title)
 
-    def plot_corner(self, models):
+    def plot_corner(self, models, **kwargs):
         phot = self.fit.phottable
         dum, inst_filt, mag, magerr = self.fit.get_fit_parameters(phot)
         # Get flux for observations in Janskies
@@ -998,13 +1013,38 @@ class sed_plot(object):
 def main():
     sed = sed_plot()
 
-    photfile = sed.fit.dirs['input']+'2017gfo.dat'
+    # Handle the --help option
+    if '-h' in sys.argv or '--help' in sys.argv:
+        parser = sed.add_options(usage=sed.usagestring)
+        options = parser.parse_args()
+        sys.exit()
+
+    # Starting banner
+    sed.command = ' '.join(sys.argv)
+    sed.make_banner('Starting: {cmd}'.format(cmd=sed.command))
+
+    parser = sed.add_options(usage=sed.usagestring)
+    opt = parser.parse_args()
+
+    photfile = sed.fit.parse_photfile(opt.objname)
+    if not photfile or not os.path.exists(photfile):
+        inpfile = sys.argv[1]
+        print(f'ERROR: input photfile {inpfile} does not exist!  Exiting...')
+        sys.exit(1)
+
     sed.load_sed('blackbody', photfile)
 
-    #sed.plot_corner(['bpass'])
-    sed.hr(mode='single', progenitors='progenitors.dat',
-        add_progenitors=True,add_yoon=False,add_lbvs=False,add_data=True,
-        add_rsg=True,limits=True)
+    for typ in opt.type.split(','):
+        if typ not in sed.plot_types.keys():
+            typs = ','.join(list(plot_types.keys()))
+            print(f'WARNING: plot type {typ} not supported.')
+            print('Plot type must be one of {typs}.  Continuing...')
+
+        models = opt.model.split(',')
+
+        func = sed.plot_types[typ]
+        kwargs=dict(opt._get_kwargs())
+        func(models, **kwargs)
 
 if __name__ == "__main__":
     main()
