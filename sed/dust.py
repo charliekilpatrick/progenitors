@@ -25,6 +25,8 @@ kappa = np.loadtxt(dustdir+'dust01_trans.dat')
 # Normalize kappa
 kappa = kappa/np.max(kappa)
 wavelength = np.loadtxt(dustdir+'wavelength.dat')
+# kappa_V, the opacity in V-band calculated from dust01_trans.dat
+kappa_V = 78.5157020156
 
 def rebin(a, newshape):
     newarray = np.zeros(newshape)
@@ -135,6 +137,34 @@ def get_rsg(scale, temp, model='10'):
 
     return(flux)
 
+def get_bb_lum(p, rsg_model='10', dust_model='g2', sptype='all', masked=True):
+
+    w = wavelength
+    flux = get_rsg(p[1], p[2], model=rsg_model)
+
+    if masked and len(w)!=5157:
+        mask = (wavelength > 3500.0) & (wavelength < 1.0e5)
+        kappa = np.loadtxt(dustdir+'dust01_trans.dat')
+        w = w[mask]
+        flux = flux[mask]
+        kappa = kappa[mask]
+
+    if sptype=='i' or sptype=='intrinsic':
+        sp = S.ArraySpectrum(w, flux, fluxunits='flam')
+        return(sp)
+
+    a_dust = get_dust(w, p[0], model=dust_model)
+    obsflux = flux * 10**(-0.4*a_dust)
+    bb_scale = simps(flux-obsflux, w)
+
+    bb = kappa * (w*1.0e-5)**-5 * 1.0/(np.exp(143843215.0/(w*p[3]))-1.0)
+    # We also need to renormalize the bb flux.  The fraction of total luminosity
+    # in the bb part of the spectrum is "scale".  So here we can simply multiply
+    # by p[1] * FLUX_SCALE
+    normalize_bb = simps(bb, w)
+    bb = bb_scale * bb / normalize_bb
+
+    return(simps(bb, w)/FLUX_SCALE)
 
 # Get model, observed flux density from star
 # Inputs are:

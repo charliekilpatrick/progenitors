@@ -27,6 +27,7 @@ import progressbar
 import numpy as np
 import argparse
 import time
+import random
 
 # Dependencies from this repo
 import constants
@@ -88,6 +89,10 @@ class sed_fitter(object):
         # Report output values to this many significant figures
         self.significant_figures = 4
 
+        # For parameters that are prohibitive to calculate with every sample,
+        # take this many random samples first and then calculate
+        self.nsamples = 20000
+
         # Magnitude system of input data (AB is usually best)
         self.magsystem = 'abmag'
 
@@ -108,6 +113,8 @@ class sed_fitter(object):
         self.limits = False     # Check during import if any values are limits
         self.extinction_model = False
         self.verbose = verbose
+
+        self.options = None
 
         self.all_ages = []
         self.all_masses = []
@@ -1256,37 +1263,67 @@ class sed_fitter(object):
 
         return(backend)
 
-    def calculate_param_best_fit(self, params, prob, ndim, name, show=True):
-
+    def sample_params(self, params, prob, ndim, nsamples=None):
         mask = np.isinf(np.abs(prob))
         if all(mask):
             print('WARNING: all probabilities are bad.  Try wider param range')
             return(params[0])
-        params = params[~mask]
+        if len(params.shape)==1:
+            params = params[~mask]
+        else:
+            params = params[~mask,:]
         prob = -1.0 * prob[~mask]
         prob = prob / np.min(prob)
 
-        # 1-sigma is min chi^2 + 1.00 (1 param), 2.30 (2 param), 3.50 (3 param)
-        # https://ned.ipac.caltech.edu/level5/Wall2/Wal3_4.html
-        chi_limit = [0.0, 1.00, 2.30, 3.50, 4.27]
-        #chi_limit = [0.0, 6.63,   9.21,   11.30]
-        mask = prob < 1.0 + 1.0#+chi_limit[ndim]
-        params = params[mask]
-        prob = prob[mask]
+        # 1-sigma (0.6827 CL) is min chi^2 + 1.00 (1 param), 2.30 (2 param),
+        # 3.50 (3 param), 4.72 (4 param), 5.89 (5 param), 7.04 (6 param)
+        # https://ned.ipac.caltech.edu/level5/Wall2/Wal3_4.html provides the
+        # values for 1-3 param.  The rest are calculated using Wolfram Alpha
+        chi_limit = [1.00, 2.30, 3.50, 4.72, 5.89, 7.04]
+        mask = prob < 1.0 + chi_limit[ndim-1]
+        if len(params.shape)==1:
+            params_sample = params[mask]
+        else:
+            params_sample = params[mask,:]
+        prob_sample = prob[mask]
 
-        best = np.argmin(prob)
+        if nsamples and nsamples < len(prob_sample):
+            rand = np.array(random.sample(range(0, len(prob_sample)), nsamples))
+            if len(params_sample.shape)==1:
+                params_sample = params_sample[rand]
+            else:
+                params_sample = params_sample[rand,:]
+            prob_sample = prob_sample[rand]
+
+        return(params_sample, prob_sample)
+
+    def calculate_param_best_fit(self, params, prob, ndim, name, show=True,
+        sampled=False):
+
+        # Parameters might have already been sampled
+        if not sampled:
+            params_sample, prob_sample = self.sample_params(params, prob, ndim)
+        else:
+            params_sample = params
+            prob_sample = prob
+
         n = int(self.significant_figures)
+        out_fmt = '{0:<18}: {1:>12} + {2:>12} - {3:>12}'
 
-        out_fmt = '{0:<12}: {1:>10} + {2:>10} - {3:>10}'
+        # Get 16-50-84 values for param_sample now that we've restricted sample
+        # to chi2 bounds
+        best = np.percentile(params_sample, 50)
+        minval = np.percentile(params_sample, 16)
+        maxval = np.percentile(params_sample, 84)
 
-        mcmc = utilities.round_to_n(params[best], n)
+        mcmc = utilities.round_to_n(best, n)
         digits = int(np.ceil(np.log10(mcmc)))
         decimal_place = -1 * (digits - n)
         if float(mcmc)==int(mcmc) and decimal_place < 1:
             mcmc=int(mcmc)
 
-        minval = round(np.min(params), decimal_place)
-        maxval = round(np.max(params), decimal_place)
+        minval = round(minval, decimal_place)
+        maxval = round(maxval, decimal_place)
         maxval = maxval-mcmc
         minval = mcmc-minval
 
@@ -1295,7 +1332,12 @@ class sed_fitter(object):
         if float(maxval)==int(maxval) and decimal_place < 1:
             maxval=int(maxval)
 
-        if decimal_place>0:
+        if np.log10(mcmc)<-3:
+            str_fmt = '%.3e'
+            mcmc = str_fmt % mcmc
+            maxval = str_fmt % maxval
+            minval = str_fmt % minval
+        elif decimal_place>0:
             str_fmt = '%7.{0}f'.format(int(decimal_place))
             mcmc = str_fmt % mcmc
             maxval = str_fmt % maxval
@@ -1303,7 +1345,7 @@ class sed_fitter(object):
 
         if show: print(out_fmt.format(name, mcmc, maxval, minval))
 
-        return(params[best])
+        return(best)
 
     def run_emcee(self, phottable, sigma=1.0, nsteps=5000, nwalkers=100,
         guess_type='params'):
@@ -1333,6 +1375,30 @@ class sed_fitter(object):
                     use_backend_pos = True
             except KeyError:
                 pass
+
+        # Check that nwalkers is consistent with the number of walkers on the
+        # backend
+        if use_backend_pos:
+            walkers_backend = backend.shape[0]
+            if nwalkers!=walkers_backend:
+                m = 'WARNING: number of walkers on backend {0} does not '+\
+                    'match input number of walkers {1}'
+                m = m.format(walkers_backend, nwalkers)
+                print(m)
+                m = 'Do you want to change nwalkers to {0} [y/n]? '.format(
+                    walkers_backend)
+                resp = input(m)
+                if resp=='y' or resp=='yes':
+                    nwalkers = walkers_backend
+                    self.options.nwalkers = walkers_backend
+                else:
+                    m = 'ERROR: inconsistent nwalkers on backend.\n'
+                    m+= 'To solve this issue, use --nwalkers {0} '.format(
+                        walkers_backend)
+                    m+= 'or delete current backend.\n'
+                    m+= 'Exiting...'
+                    print(m)
+                    sys.exit(1)
 
         if use_backend_pos:
             print('Current number of iterations on backend:',backend.iteration)
@@ -1385,6 +1451,56 @@ class sed_fitter(object):
             radius = np.sqrt(lum / temp**4)
 
             r=self.calculate_param_best_fit(radius, prob, ndim, 'radius')
+
+        # Calculate dust parameters from model params
+        if model_type=='rsg':
+            print('\n\n')
+            print('RSG dust parameters:')
+            # Need to sample parameters first since this part takes a long time
+            # for a chain of samples > tens of thousands
+            best_prob = np.array([np.max(prob)])
+            extparams = np.array([params])
+            param_sample, prob_sample = self.sample_params(sample, prob, ndim,
+                nsamples=self.nsamples)
+            param_sample = np.concatenate((param_sample, extparams), axis=0)
+            prob_sample = np.concatenate((prob_sample, best_prob), axis=0)
+
+            bar = progressbar.ProgressBar(max_value=len(param_sample))
+            bar.start()
+            bb_lum = []
+            for i,p in enumerate(param_sample):
+                # Account for the fact that log_L->L
+                p[1] = 10**p[1]
+                bar.update(i)
+                bb_lum.append(dust.get_bb_lum(p))
+            bar.finish()
+            bb_lum = np.array(bb_lum)
+
+            # First impose chi-2 cut and take random samples
+            tidx = np.array(['dust_temp' in par for par in self.model_fit_params])
+            kidx = np.array(['tau' in par for par in self.model_fit_params])
+
+            dust_temp = param_sample[:,tidx] / 5777
+            dust_temp = dust_temp[:,0]
+            radius = np.sqrt(bb_lum / dust_temp**4)
+            tau = param_sample[:,kidx]
+            tau = tau[:,0]
+
+            mass = 4 * np.pi * tau * dust.kappa_V**-1 * radius * 2 * radius *\
+                constants.DUST_BB_MASS
+
+            # Mass-loss rate assuming v_wind = 10 km/s
+            mlr = 4 * np.pi * tau * dust.kappa_V**-1 * radius *\
+                constants.DUST_BB_WIND * constants.RSG_V_WIND
+
+            r=self.calculate_param_best_fit(np.log10(bb_lum), prob_sample, ndim,
+                'dust luminosity', sampled=True)
+            r=self.calculate_param_best_fit(radius, prob_sample, ndim,
+                'dust radius', sampled=True)
+            r=self.calculate_param_best_fit(mass, prob_sample, ndim,
+                'dust mass', sampled=True)
+            r=self.calculate_param_best_fit(mlr, prob_sample, ndim,
+                'mass-loss rate', sampled=True)
 
         print('\n\n')
 
@@ -1602,11 +1718,11 @@ class sed_fitter(object):
             print('Total Extinction chi^2:', value)
 
         if np.isinf(chi2):
-            print('Sum chi^2: inf')
+            print('Sum chi^2 for best: inf')
         elif isinstance(chi2, float):
-            print('Sum chi^2: {0}'.format('%7.4f'%chi2))
+            print('Sum chi^2 for best: {0}'.format('%7.4f'%chi2))
         else:
-            print('Sum chi^2:', np.asscalar(-1.0*chi2))
+            print('Sum chi^2 for best:', np.asscalar(-1.0*chi2))
 
     def get_wavelength_widths(self, spectrum, bandpasses):
 
@@ -1650,6 +1766,7 @@ def main():
 
     parser = sed.add_options(usage=sed.usagestring)
     opt = parser.parse_args()
+    sed.options = opt
 
     photfile = sed.parse_photfile(opt.objname)
     if not photfile or not os.path.exists(photfile):
@@ -1664,6 +1781,8 @@ def main():
 
     run_models = [opt.model]*opt.niter
     for model in run_models:
+        # Grab options again in case they were changed as part of an iteration
+        opt = sed.options
 
         # Set model type and import photometry table, bandpasses
         # Input host extinction in (Av,Rv)

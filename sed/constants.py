@@ -21,6 +21,17 @@ BB_SCALE = 1.1483949e19
 # Converts pickles spectrum normalized to 1 to solar luminosity flux units
 PICKLES_CONST = 3.08397467e-7
 
+# Constant to scale 4*pi*tauV/kappaV*R_in * R_out to Msun with kappaV in cm2/g,
+# Rin and Rout in Rsun
+DUST_BB_MASS = 2.4319771e-12
+
+# Constant to scale 4*pi*tauV/kappV*R_in * v_wind to Msun/yr with kappaV in
+# cm2/g, Rin in Rsun, vwind in km/s
+DUST_BB_WIND = 1.10346114e-10
+
+# 10km/s is default
+RSG_V_WIND = 10.0
+
 FIGSIZE = 10.0
 
 # Alternate names for phottable on input
