@@ -216,6 +216,9 @@ class sed_fitter(object):
         parser.add_argument('--sigma', type=float, default=1.0,
             help='Vary the initial parameter guesses for each walker by'+\
             'best guess * np.random.lognormal(1.0, sigma)')
+        parser.add_argument('--nsamples', type=int, default=20000,
+            help='For rsg model, number of samples to use for calculating '+\
+            'dust parameters.')
 
         return(parser)
 
@@ -247,6 +250,10 @@ class sed_fitter(object):
     def load_extinction(self, fromfile='', val=None):
 
         extdir = self.dirs['extinction']
+        # Check for host_ebv file name stored in phottable metadata
+        if self.phottable and 'host_ebv' in self.phottable.meta.keys():
+            if not utilities.is_number(self.phottable.meta['host_ebv']):
+                fromfile = self.phottable.meta['host_ebv']
         # Files should be formatted following extinction ipynb
         if fromfile:
             self.extinction_model=True
@@ -698,30 +705,51 @@ class sed_fitter(object):
         filt = inst_filt.split('_')[-1].lower()
 
         bp = None
-        if ('wfc3' in inst and 'uvis' in inst):
-            bp=S.ObsBandpass('wfc3,uvis1,'+filt)
-        elif ('wfpc2' in inst):
-            bp=S.ObsBandpass('wfpc2,'+filt)
-        elif ('acs' in inst and 'wfc' in inst):
-            bp=S.ObsBandpass('acs,wfc1,'+filt)
-        elif ('acs' in inst and 'sbc' in inst):
-            bp=S.ObsBandpass('acs,wfc1,'+filt)
-        elif ('acs' in inst and 'hrc' in inst):
-            bp=S.ObsBandpass('acs,sbc,'+filt)
-        elif ('wfc3' in inst and 'ir' in inst):
+        if 'wfc3' in inst and 'uvis' in inst:
+            if 'uvis2' in inst:
+                bp=S.ObsBandpass('wfc3,uvis2,'+filt)
+            # Default to UVIS1
+            else:
+                bp=S.ObsBandpass('wfc3,uvis1,'+filt)
+        elif 'wfc3' in inst and 'ir' in inst:
             bp=S.ObsBandpass('wfc3,ir,'+filt)
-        elif ('wfc3' in inst):
+        elif 'acs' in inst and 'wfc' in inst:
+            if 'wfc2' in inst:
+                bp=S.ObsBandpass('acs,wfc2,'+filt)
+            # Default to WFC1
+            else:
+                bp=S.ObsBandpass('acs,wfc1,'+filt)
+        elif 'acs' in inst and 'hrc' in inst:
+            bp=S.ObsBandpass('acs,hrc,'+filt)
+        elif 'acs' in inst and 'sbc' in inst:
+            bp=S.ObsBandpass('acs,sbc,'+filt)
+        elif 'wfpc2' in inst:
             bp=S.ObsBandpass('wfpc2,'+filt)
-        elif ('spitzer' in inst and 'irac' in inst):
-            filename = 'SPITZER.IRAC.'+filt.upper()+'.dat'
+        else:
+            # Load from bandpass directory
+            if ('spitzer' in inst and 'irac' in inst):
+                filename = 'SPITZER.IRAC.'+filt.upper()+'.dat'
+            elif ('ps1' in inst and 'gpc1' in inst):
+                filename = 'PS1.GPC1.'+filt.lower()+'.dat'
+            elif ('lsst' in inst):
+                filename = 'LSST.'+filt.lower()+'.dat'
+            elif ('lcogt' in inst):
+                filename = 'LCOGT.'+filt.lower()+'.dat'
+            elif ('swift' in inst):
+                filename = 'SWIFT.'+filt.lower()+'.dat'
+            elif ('swope' in inst):
+                filename = 'SWOPE.'+filt.lower()+'.dat'
+            elif ('atlas' in inst):
+                filename = 'ATLAS.'+filt.lower()+'.dat'
+            elif ('asassn' in inst):
+                filename = 'ASASSN.'+filt.lower()+'.dat'
+
             file = bpdir + filename
-            wave,trans = np.loadtxt(file, unpack=True)
-            bp = S.ArrayBandpass(wave, trans, name=filt.lower(),
-                waveunits='Angstrom')
-        elif ('ps1' in inst and 'gpc' in inst):
-            filename = 'PS1.'+filt.lower()+'.dat'
-            file = bpdir + filename
-            wave,trans = np.loadtxt(file, unpack=True)
+            if not os.path.exists(file):
+                print(f'WARNING: filter for {inst_filt} does not exist!')
+                return(None)
+
+            wave, trans = np.loadtxt(file, unpack=True)
             bp = S.ArrayBandpass(wave, trans, name=filt.lower(),
                 waveunits='Angstrom')
 
@@ -1767,6 +1795,8 @@ def main():
     parser = sed.add_options(usage=sed.usagestring)
     opt = parser.parse_args()
     sed.options = opt
+
+    sed.nsamples = opt.nsamples
 
     photfile = sed.parse_photfile(opt.objname)
     if not photfile or not os.path.exists(photfile):

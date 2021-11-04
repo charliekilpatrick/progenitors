@@ -14,6 +14,8 @@
 # - {distance: 14.4}
 # - {dist_error: 1.4}
 # - {discovery_date: 2019-12-27T12:30:14.000}
+# - {host_ebv: 2019yvr}
+# - {ads: https://ui.adsabs.harvard.edu/abs/2021MNRAS.504.2073K}
 # schema: astropy-2.0
 MJD Instrument Filter Exposure Magnitude Uncertainty
 ----------- WFC3/UVIS F438W 3420.0 26.1382 0.1622

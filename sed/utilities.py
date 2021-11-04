@@ -5,6 +5,14 @@ import numpy as np
 import dustmaps.sfd
 import os
 
+def is_number(val):
+    try:
+        val = float(val)
+        return(True)
+    except ValueError:
+        return(False)
+
+    return(False)
 
 def import_dustmap():
     for pole in ['ngp', 'sgp']:
