@@ -13,12 +13,28 @@
 # - {dec: -0.459107105959}
 # - {distance: 14.4}
 # - {dist_error: 1.4}
+# - {magsystem: ab}
 # - {discovery_date: 2019-12-27T12:30:14.000}
 # - {host_ebv: 2019yvr}
 # - {ads: https://ui.adsabs.harvard.edu/abs/2021MNRAS.504.2073K}
 # schema: astropy-2.0
-MJD Instrument Filter Exposure Magnitude Uncertainty
------------ WFC3/UVIS F438W 3420.0 26.1382 0.1622
------------ WFC3/UVIS F555W 5886.0 25.3512 0.0319
------------ WFC3/UVIS F625W 5682.0 24.8971 0.0221
------------ WFC3/UVIS F814W 3456.0 24.2533 0.0319
+MJD         Instrument   Filter Exposure Magnitude Uncertainty Use
+57864.06972 WFC3/UVIS    F438W  1140     26.2028   0.2207      1
+57864.11750 WFC3/UVIS    F625W  1134     24.8352   0.0466      1
+57864.17879 WFC3/UVIS    F555W  1200     25.4011   0.0720      1
+57864.24510 WFC3/UVIS    F814W  1152     24.1778   0.0498      1
+57890.23024 WFC3/UVIS    F555W  1143     25.1599   0.0612      1
+57890.24828 WFC3/UVIS    F625W  1140     24.8008   0.0443      1
+57917.36677 WFC3/UVIS    F438W  1140     26.3646   0.4810      1
+57917.39478 WFC3/UVIS    F625W  1134     24.9420   0.0538      1
+57917.43295 WFC3/UVIS    F555W  1200     25.5264   0.0853      1
+57917.46140 WFC3/UVIS    F814W  1152     24.3412   0.0588      1
+57944.68250 WFC3/UVIS    F555W  1143     25.2253   0.0621      1
+57944.75022 WFC3/UVIS    F625W  1140     24.8760   0.0478      1
+57972.22031 WFC3/UVIS    F438W  1140     25.9439   0.2410      1
+57972.23837 WFC3/UVIS    F625W  1134     25.0531   0.0559      1
+57972.28531 WFC3/UVIS    F555W  1200     25.4908   0.0829      1
+57972.30377 WFC3/UVIS    F814W  1152     24.2492   0.0575      1
+57917.88560 Spitzer/IRAC Ch1    1530.0   22.8      0.0000      1
+57904.13112 Spitzer/IRAC Ch2    1864.8   23.1      0.0000      1
+57918.00342 Spitzer/IRAC Ch3    278.0    21.5      0.0000      1

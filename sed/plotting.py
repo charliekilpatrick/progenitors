@@ -28,6 +28,10 @@ S.setref(area = 25.0 * 10000)
 
 MPC_TO_CM = 3.08568025e24
 
+def truncate(n, decimals=0):
+    multiplier = 10 ** decimals
+    return int(n * multiplier) / multiplier
+
 class sed_plot(object):
     def __init__(self):
 
@@ -35,6 +39,9 @@ class sed_plot(object):
         self.figsize = 10.0
 
         self.fit = sed_fitter(verbose=False)
+        self.options = None
+
+        self.outdir = 'figures/'
 
         rc('font',**{'family':'serif','serif':['Times'],
             'size':5.0*self.figsize})
@@ -53,6 +60,9 @@ class sed_plot(object):
             'f_lambda': flux.format('f', flux_fmt,
                 ' erg s'+r'$^{-1}$'+' cm'+r'$^{-2}$~\AA$^{-1}$'),
             'log_T': r'$\log(T_{\mathrm{eff}}/\mathrm{K})$',
+            'Teff': r'$T_{\mathrm{eff}}/\mathrm{K}$',
+            'Tdust': r'$T_{\mathrm{dust,eff}}/\mathrm{K}$',
+            'A_V': r'$A_{V}$',
             'log_L': r'$\log(L/L_{\odot})$',
             'initial_mass': r'$M/M_{\odot}$',
             'period': r'$\log(P/\mathrm{1 day})$',
@@ -67,7 +77,7 @@ class sed_plot(object):
             'lightcurve': self.lightcurve,
         }
 
-        self.usagestring = 'plotting.py objname type'
+        self.usagestring = 'plotting.py objname type models'
 
     def add_options(self, parser=None, usage=None):
         import argparse
@@ -156,6 +166,10 @@ class sed_plot(object):
                 sp = S.ArraySpectrum(sp.wave, sp.flux/1.086)
             elif model=='rsg':
                 sp = self.fit.create_rsg(*params)
+                label = 'RSG + {0} K dust'
+                # Round dust temp to hundreds place
+                dust_temp = int(truncate(params[3],-2))
+                title = label.format(dust_temp)
 
 
             # Spectra should be scaled to absolute magnitudes, so flux at 10 pc,
@@ -184,10 +198,17 @@ class sed_plot(object):
                 fluxcorr = True
 
             if i==0:
-                ax.errorbar(wave, flux, yerr=fluxerr, xerr=width,
-                    marker='o', color=red, ls='none', capsize=0.5*self.figsize,
-                    linewidth=0.6*self.figsize, zorder=5, ms=2*self.figsize,
-                    markeredgecolor=black, markeredgewidth=0.4*self.figsize)
+                for j in np.arange(len(wave)):
+                    if fluxerr[j]==0.0:
+                        uplim = np.array([1])
+                        fluxerr[j] = 0.3 * flux[j]
+                    else:
+                        uplim = np.array([0])
+                    ax.errorbar([wave[j]], [flux[j]], yerr=[fluxerr[j]],
+                        xerr=[width[j]], marker='o', color=red, ls='none',
+                        capsize=0.5*self.figsize, linewidth=0.6*self.figsize,
+                        zorder=5, ms=2*self.figsize, markeredgecolor=black,
+                        markeredgewidth=0.4*self.figsize, uplims=uplim)
 
             ax.plot(sp.wave, sp.flux, label=title, zorder=0,
                 color=pallette[i+2], linewidth=0.6*self.figsize)
@@ -232,8 +253,17 @@ class sed_plot(object):
         ax.set_yticks(ytickval, minor=True)
         ax.set_yticklabels(yticklabel, minor=True)
 
-        legend = ax.legend(loc='lower right', fontsize='large')
-        self.close_plot('sed.eps')
+        if xlim[1] > 1.0e5:
+            xlim[1]=1.0e5
+            ax.set_xlim(xlim)
+            ax.set_xscale('log')
+
+        legend = ax.legend(loc='best', fontsize=4.0*self.figsize)
+
+        # Outfile
+        outfile = self.options.objname.strip() + '_sed.eps'
+        outfile = os.path.join(self.outdir, outfile)
+        self.close_plot(outfile)
 
     def load_yoon(self, file):
         header = ('model','mass','log_L','reff','log_Teff','helium','co','henv',
@@ -931,7 +961,7 @@ class sed_plot(object):
 
         self.close_plot(plot_title)
 
-    def plot_corner(self, models, **kwargs):
+    def plot_corner(self, models, plot_blobs=False, **kwargs):
         phot = self.fit.phottable
         dum, inst_filt, mag, magerr = self.fit.get_fit_parameters(phot)
         # Get flux for observations in Janskies
@@ -941,8 +971,6 @@ class sed_plot(object):
 
         bps = [self.fit.inst_filt_to_bandpass(i) for i in inst_filt]
         bandpasses = np.array(bps)
-
-        # Set up plot
 
         for i,model in enumerate(models):
 
@@ -957,21 +985,34 @@ class sed_plot(object):
 
             self.fit.set_model_type(model, extinction=True)
             self.fit.backend = self.fit.load_backend(model, self.fit.phottable)
+
+            ndim = len(self.fit.model_fit_params)
             samples = np.array(self.fit.backend.get_chain(flat=True))
-            blobs = np.array(self.fit.backend.get_blobs(flat=True))
+            prob = np.array(self.fit.backend.get_log_prob(flat=True))
 
-            Av_step = 0.1
-            Rv_step = 0.08333333333
+            samples, prob = self.fit.sample_params(samples, prob, ndim,
+                downsample=0.8)
 
-            adjust = rand(blobs.shape[0]*blobs.shape[1]) - 0.5
-            adjust = adjust.reshape(blobs.shape)
-            adjust[:,1] = adjust[:,1] * 2*Av_step
-            adjust[:,0] = adjust[:,0] * 2*Rv_step
+            nsamples = len(samples)
+            print(f'Plottinng {nsamples} samples for model {model}')
 
-            blobs = blobs + adjust
+            if plot_blobs:
+                blobs = np.array(self.fit.backend.get_blobs(flat=True))
+                blobs = blobs[start_idx:]
 
+                Av_step = 0.1
+                Rv_step = 0.08333333333
 
-            data = np.hstack([samples, blobs])
+                adjust = rand(blobs.shape[0]*blobs.shape[1]) - 0.5
+                adjust = adjust.reshape(blobs.shape)
+                adjust[:,1] = adjust[:,1] * 2*Av_step
+                adjust[:,0] = adjust[:,0] * 2*Rv_step
+
+                blobs = blobs + adjust
+
+                data = np.hstack([samples, blobs])
+            else:
+                data = samples
 
             # Get rid of nan values in samples and blobs
             mask = ~np.isnan(data)
@@ -1000,14 +1041,37 @@ class sed_plot(object):
                     hist_kwargs={'linewidth': 0.4*self.figsize},
                     labelpad=npad*self.figsize)
 
+            elif model=='rsg':
+                # Transform tau_V -> A_V
+                data[:,0] = 0.79 * data[:,0]
+
+                data_range = []
+                for i in np.arange(4):
+                    data_range.append((0.95*np.min(data[:,i]),
+                        1.05*np.max(data[:,i])))
+
+                fig = corner.corner(data, bins=20,
+                    labels=(self.axis_titles['A_V'],
+                            self.axis_titles['log_L'],
+                            self.axis_titles['Teff'],
+                            self.axis_titles['Tdust']),
+                    ms=12, title_kwargs={'fontsize': 3.1*self.figsize},
+                    range=data_range,
+                    hist_kwargs={'linewidth': 0.4*self.figsize},
+                    labelpad=npad*self.figsize)
+            else:
+                print(f'ERROR: {model} not recognized for corner plot!')
+                return(None)
+
             fig.set_size_inches(1.5*self.figsize, 1.5*self.figsize)
             plt.tight_layout(pad=0.1*self.pad, w_pad=self.pad, h_pad=self.pad)
 
-            dummy = model+'-corner.pdf'
-            outfile = model+'-corner.eps'
-            fig.savefig(dummy, format='pdf')
+            outfile = self.options.objname + f'_corner_{model}.pdf'
+            outfile = self.outdir + outfile
 
-            subprocess.call(['pdf2ps', dummy, outfile])
+            fig.savefig(outfile, format='pdf')
+
+            subprocess.call(['pdf2ps', outfile, outfile.replace('.pdf','.eps')])
 
 
 def main():
@@ -1025,6 +1089,10 @@ def main():
 
     parser = sed.add_options(usage=sed.usagestring)
     opt = parser.parse_args()
+    sed.options = opt
+
+    if not os.path.exists(sed.outdir):
+        os.makedirs(sed.outdir)
 
     photfile = sed.fit.parse_photfile(opt.objname)
     if not photfile or not os.path.exists(photfile):
@@ -1036,7 +1104,7 @@ def main():
 
     for typ in opt.type.split(','):
         if typ not in sed.plot_types.keys():
-            typs = ','.join(list(plot_types.keys()))
+            typs = ','.join(list(sed.plot_types.keys()))
             print(f'WARNING: plot type {typ} not supported.')
             print('Plot type must be one of {typs}.  Continuing...')
 

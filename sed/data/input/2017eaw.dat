@@ -11,9 +11,91 @@
 # - {name: 2017eaw}
 # - {ra: 308.684333}
 # - {dec: 60.193289}
-# - {distance: 6.5}
-# - {dist_error: 0.0}
+# - {distance: 6.72}
+# - {dist_error: 0.15}
+# - {host_ebv: 0.0}
+# - {host_rv: 3.1}
+# - {magsystem: ab}
+# - {host_galaxy: NGC_6946}
+# - {ads: https://ui.adsabs.harvard.edu/abs/2018MNRAS.481.2536K}
 # schema: astropy-2.0
-MJD Instrument Filter Exposure Magnitude Uncertainty
------------  WFC3/UVIS  F814W    5886.0000      22.5500   0.0318
------------  WFC3/UVIS  F606W    3456.0000      26.3340   0.0317
+MJD          Instrument   Filter   Exposure       Magnitude Uncertainty Use
+53216.03     ACS/WFC      F814W    120.0000       25.550    0.0360      1
+53216.04     ACS/WFC      F658N    700.0000       23.600    0.0000      1
+57427.76     WFC3/IR      F128N    2823.48        19.771    0.0320      1
+57427.83     WFC3/IR      F110W    455.88         20.712    0.0120      1
+57685.64     WFC3/IR      F160W    396.92         19.377    0.0070      1
+57685.64     WFC3/IR      F164N    2396.93        19.109    0.0120      1
+57687.74     ACS/WFC      F606W    2430.0000      26.366    0.0490      1
+57687.81     ACS/WFC      F814W    2570.0000      22.825    0.0090      1
+53166.763    Spitzer/IRAC Ch1      0.0            20.7754   0.2322      1
+53166.763    Spitzer/IRAC Ch2      0.0            21.2981   0.1330      1
+53166.763    Spitzer/IRAC Ch3      0.0            20.4745   0.0000      1
+53166.763    Spitzer/IRAC Ch4      0.0            19.3224   0.0000      1
+53260.291    Spitzer/IRAC Ch1      0.0            20.4648   0.1586      1
+53260.291    Spitzer/IRAC Ch2      0.0            21.0968   0.1097      1
+53260.291    Spitzer/IRAC Ch3      0.0            20.6974   0.0000      1
+53260.291    Spitzer/IRAC Ch4      0.0            19.4171   0.0000      1
+53334.741    Spitzer/IRAC Ch1      0.0            20.9722   0.2763      1
+53334.741    Spitzer/IRAC Ch2      0.0            21.2568   0.1059      1
+53334.741    Spitzer/IRAC Ch3      0.0            20.2079   0.0000      1
+53334.741    Spitzer/IRAC Ch4      0.0            19.1758   0.0000      1
+53571.226    Spitzer/IRAC Ch1      0.0            20.8181   0.2300      1
+53571.226    Spitzer/IRAC Ch2      0.0            21.3872   0.1649      1
+53571.226    Spitzer/IRAC Ch3      0.0            20.2858   0.0000      1
+53571.226    Spitzer/IRAC Ch4      0.0            19.3716   0.0000      1
+53734.886    Spitzer/IRAC Ch4      0.0            19.0535   0.0000      1
+53959.500    Spitzer/IRAC Ch3      0.0            20.2154   0.0000      1
+54065.906    Spitzer/IRAC Ch2      0.0            21.1609   0.1432      1
+54065.906    Spitzer/IRAC Ch4      0.0            19.2050   0.0000      1
+54098.031    Spitzer/IRAC Ch2      0.0            21.2131   0.2458      1
+54098.031    Spitzer/IRAC Ch4      0.0            19.1065   0.0000      1
+54284.966    Spitzer/IRAC Ch1      0.0            20.7655   0.2296      1
+54461.066    Spitzer/IRAC Ch2      0.0            21.3374   0.1540      1
+54461.066    Spitzer/IRAC Ch4      0.0            19.1313   0.0000      1
+54492.854    Spitzer/IRAC Ch2      0.0            21.5641   0.2202      1
+54492.854    Spitzer/IRAC Ch4      0.0            18.8221   0.0000      1
+54665.795    Spitzer/IRAC Ch1      0.0            20.9687   0.2507      1
+54665.795    Spitzer/IRAC Ch3      0.0            19.0535   0.0000      1
+55049.005    Spitzer/IRAC Ch1      0.0            20.9824   0.1459      1
+55201.619    Spitzer/IRAC Ch2      0.0            21.3859   0.0869      1
+55421.583    Spitzer/IRAC Ch1      0.0            21.1452   0.1714      1
+55769.871    Spitzer/IRAC Ch1      0.0            20.8607   0.2597      1
+55774.835    Spitzer/IRAC Ch1      0.0            20.7876   0.1291      1
+55958.073    Spitzer/IRAC Ch2      0.0            21.4137   0.0946      1
+56521.151    Spitzer/IRAC Ch1      0.0            20.6593   0.1159      1
+56660.587    Spitzer/IRAC Ch2      0.0            21.4815   0.1872      1
+56705.618    Spitzer/IRAC Ch2      0.0            21.4660   0.0942      1
+56742.558    Spitzer/IRAC Ch1      0.0            21.0994   0.1658      1
+56742.558    Spitzer/IRAC Ch2      0.0            21.4951   0.1104      1
+56916.204    Spitzer/IRAC Ch1      0.0            21.1368   0.1652      1
+56916.204    Spitzer/IRAC Ch2      0.0            21.4085   0.0950      1
+56945.568    Spitzer/IRAC Ch1      0.0            20.8445   0.1322      1
+56945.568    Spitzer/IRAC Ch2      0.0            21.5122   0.0962      1
+57053.988    Spitzer/IRAC Ch2      0.0            21.3021   0.1624      1
+57267.257    Spitzer/IRAC Ch1      0.0            20.9061   0.1404      1
+57267.257    Spitzer/IRAC Ch2      0.0            21.1639   0.0761      1
+57272.908    Spitzer/IRAC Ch1      0.0            20.7230   0.1106      1
+57272.908    Spitzer/IRAC Ch2      0.0            21.3715   0.0853      1
+57281.896    Spitzer/IRAC Ch1      0.0            20.8620   0.1410      1
+57281.896    Spitzer/IRAC Ch2      0.0            21.2564   0.0768      1
+57293.995    Spitzer/IRAC Ch1      0.0            20.9942   0.1421      1
+57293.995    Spitzer/IRAC Ch2      0.0            21.3609   0.0746      1
+57351.454    Spitzer/IRAC Ch1      0.0            20.6741   0.0996      1
+57351.454    Spitzer/IRAC Ch2      0.0            20.8650   0.0481      1
+57379.886    Spitzer/IRAC Ch1      0.0            20.9936   0.1420      1
+57379.886    Spitzer/IRAC Ch2      0.0            21.2327   0.0743      1
+57673.305    Spitzer/IRAC Ch1      0.0            21.1144   0.1609      1
+57673.305    Spitzer/IRAC Ch2      0.0            21.5683   0.1009      1
+57752.440    Spitzer/IRAC Ch1      0.0            20.9926   0.1415      1
+57752.440    Spitzer/IRAC Ch2      0.0            21.3425   0.0852      1
+57843.989    Spitzer/IRAC Ch1      0.0            20.7699   0.1205      1
+57843.989    Spitzer/IRAC Ch2      0.0            21.1694   0.0811      1
+58009.649    Spitzer/IRAC Ch1      0.0            14.5630   0.0032      1
+58009.649    Spitzer/IRAC Ch2      0.0            14.3917   0.0073      1
+58080.795    Spitzer/IRAC Ch1      0.0            15.6437   0.0214      1
+58080.795    Spitzer/IRAC Ch2      0.0            14.7841   0.0081      1
+58129.391    Spitzer/IRAC Ch1      0.0            16.3796   0.0162      1
+58129.391    Spitzer/IRAC Ch2      0.0            15.1741   0.0070      1
+58178.156    Spitzer/IRAC Ch1      0.0            17.0215   0.0208      1
+58178.156    Spitzer/IRAC Ch2      0.0            15.6595   0.0062      1

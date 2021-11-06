@@ -15,6 +15,7 @@
 # - {dist_error: 3.6}
 # - {host_ebv: 0.52}
 # - {host_rv: 3.19}
+# - {magsystem: ab}
 # - {discovery_date: 2020-03-31T08:06:00.000}
 # - {ads: https://ui.adsabs.harvard.edu/abs/2021MNRAS.tmp.2821T}
 # schema: astropy-2.0

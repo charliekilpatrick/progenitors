@@ -219,6 +219,9 @@ class sed_fitter(object):
         parser.add_argument('--nsamples', type=int, default=20000,
             help='For rsg model, number of samples to use for calculating '+\
             'dust parameters.')
+        parser.add_argument('--skipdust', default=False, action='store_true',
+            help='For the RSG model, set this flag to skip sampling the '+\
+            'dust parameters as part of showing the output.')
 
         return(parser)
 
@@ -489,7 +492,8 @@ class sed_fitter(object):
             # Remove inst_filt pairs that we don't need to calculate
             for key in models.keys():
                 if key in inst_filt:
-                    print('Removing',key,'already in model file')
+                    if self.verbose:
+                        print('Removing',key,'already in model file')
                     inst_filt.remove(key)
             # Exit if we have all models
             if not inst_filt:
@@ -1291,7 +1295,7 @@ class sed_fitter(object):
 
         return(backend)
 
-    def sample_params(self, params, prob, ndim, nsamples=None):
+    def sample_params(self, params, prob, ndim, nsamples=None, downsample=1.0):
         mask = np.isinf(np.abs(prob))
         if all(mask):
             print('WARNING: all probabilities are bad.  Try wider param range')
@@ -1308,7 +1312,7 @@ class sed_fitter(object):
         # https://ned.ipac.caltech.edu/level5/Wall2/Wal3_4.html provides the
         # values for 1-3 param.  The rest are calculated using Wolfram Alpha
         chi_limit = [1.00, 2.30, 3.50, 4.72, 5.89, 7.04]
-        mask = prob < 1.0 + chi_limit[ndim-1]
+        mask = prob < 1.0 + downsample * chi_limit[ndim-1]
         if len(params.shape)==1:
             params_sample = params[mask]
         else:
@@ -1429,7 +1433,9 @@ class sed_fitter(object):
                     sys.exit(1)
 
         if use_backend_pos:
-            print('Current number of iterations on backend:',backend.iteration)
+            if self.verbose:
+                print('Current number of iterations on backend:',
+                    backend.iteration)
             init_pos = backend.get_last_sample()
         else:
             init_pos = self.get_init_pos(guess, ndim, nwalkers, sigma=sigma)
@@ -1461,7 +1467,7 @@ class sed_fitter(object):
             b=self.calculate_param_best_fit(blob[:,i], prob, ndim, param)
             blobs.append(b)
 
-        if self.distance[1]!=0.0:
+        if self.distance[1]!=0.0 and self.verbose:
             print('Distance: ',self.distance[0],'+/-',self.distance[1])
             logL_unc = 2.17 * self.distance[1]/self.distance[0]
             print('Additional uncertainty on log_L:','%.4f'%logL_unc)
@@ -1481,7 +1487,7 @@ class sed_fitter(object):
             r=self.calculate_param_best_fit(radius, prob, ndim, 'radius')
 
         # Calculate dust parameters from model params
-        if model_type=='rsg':
+        if model_type=='rsg' and not self.options.skipdust and self.verbose:
             print('\n\n')
             print('RSG dust parameters:')
             # Need to sample parameters first since this part takes a long time
@@ -1505,7 +1511,8 @@ class sed_fitter(object):
             bb_lum = np.array(bb_lum)
 
             # First impose chi-2 cut and take random samples
-            tidx = np.array(['dust_temp' in par for par in self.model_fit_params])
+            tidx = np.array(['dust_temp' in par
+                for par in self.model_fit_params])
             kidx = np.array(['tau' in par for par in self.model_fit_params])
 
             dust_temp = param_sample[:,tidx] / 5777
@@ -1530,7 +1537,7 @@ class sed_fitter(object):
             r=self.calculate_param_best_fit(mlr, prob_sample, ndim,
                 'mass-loss rate', sampled=True)
 
-        print('\n\n')
+        if self.verbose: print('\n\n')
 
         if not blobs and self.host_ext:
             blobs = self.host_ext
@@ -1538,8 +1545,9 @@ class sed_fitter(object):
         model_mag, Av, Rv = self.compute_model_mag(inst_filt, params,
             extinction=blobs)
 
-        self.print_model_results(inst_filt, model_mag, mag, magerr, params,
-            blobs, mjd)
+        if self.verbose:
+            self.print_model_results(inst_filt, model_mag, mag, magerr, params,
+                blobs, mjd)
 
     # Check bounds for input model parameters
     def check_bounds(self, theta):
@@ -1840,8 +1848,9 @@ def main():
         chi2, Av, Rv = sed.log_likelihood(theta, inst_filt, mag, magerr,
             extinction=ext)
 
-        sed.print_model_results(inst_filt, model, mag, magerr, theta, ext, mjd,
-            outtype='initial')
+        if sed.verbose:
+            sed.print_model_results(inst_filt, model, mag, magerr, theta, ext,
+                mjd, outtype='initial')
 
         # Run the MCMC
         sed.run_emcee(sed.phottable, sigma=opt.sigma, nsteps=opt.nsteps,
