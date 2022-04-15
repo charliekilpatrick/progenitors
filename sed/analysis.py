@@ -219,14 +219,22 @@ class sed_fitter(object):
         parser.add_argument('--nsamples', type=int, default=20000,
             help='For rsg model, number of samples to use for calculating '+\
             'dust parameters.')
+        parser.add_argument('--notau', default=False, action='store_true',
+            help='For the RSG model, set this flag to ignore tau_V and Tdust '+\
+            ' parameters as part of fit.')
         parser.add_argument('--skipdust', default=False, action='store_true',
             help='For the RSG model, set this flag to skip sampling the '+\
             'dust parameters as part of showing the output.')
 
+
         return(parser)
 
-    def set_model_type(self, model_type, extinction=False):
+    def set_model_type(self, model_type, extinction=False, notau=False):
         self.model_type = model_type
+
+        if model_type=='rsg' and notau:
+            model_fit_params['rsg'] = ['luminosity','temperature']
+
         self.model_fit_params = model_fit_params[model_type]
         # Fit for host extinction with emcee blobs
         if extinction: self.model_fit_blobs = ['Av','Rv']
@@ -235,6 +243,10 @@ class sed_fitter(object):
         if model_type=='rsg':
             self.bounds['luminosity']=[3.0,5.6]
             self.bounds['temperature']=[2600.0, 8000.0]
+
+        if model_type=='pickles':
+            self.bounds['luminosity']=[3.0,6.0]
+            self.bounds['temperature']=[2500.35,39810.7]
 
     # For a cumulative distribution function cdf with dimensions N, M
     # corresponding to arr1 and arr2, respectively, create a uniform random
@@ -605,7 +617,8 @@ class sed_fitter(object):
                 models = pickle.load(open(pfile, 'rb'))
                 # Remove inst_filt pairs that we don't need to calculate
                 for key in models.keys():
-                    inst_filt.remove(key)
+                    if key in inst_filt:
+                        inst_filt.remove(key)
                 # Exit if we have all models
                 if not inst_filt:
                     return(models)
@@ -644,12 +657,14 @@ class sed_fitter(object):
 
             # Calculate magnitudes for a range of luminosity, tau_V, and dust
             # temperatures
+            #nLval = 4 ; nTdval = 4 ; ntau_Vval = 4 ; nTval = 4
+            nLval = 26 ; nTdval = 12 ; ntau_Vval = 12 ; nTval = 20
             Lval = np.linspace(self.bounds['luminosity'][0],
-                self.bounds['luminosity'][1], 26)
-            Tdval = 10**np.linspace(1, 3.35, 12)
-            tau_Vval = 10**np.linspace(-2.0, 0.8, 12)
+                self.bounds['luminosity'][1], nLval)
+            Tdval = 10**np.linspace(1, 3.35, nTdval)
+            tau_Vval = 10**np.linspace(-2.0, 0.8, ntau_Vval)
             Tval = np.linspace(self.bounds['temperature'][0],
-                self.bounds['temperature'][1], 20)
+                self.bounds['temperature'][1], nTval)
 
             inst_filt = [self.get_inst_filt(row) for row in phottable]
             # Get unique inst_filt values
@@ -658,6 +673,7 @@ class sed_fitter(object):
             models = None
 
             pfile = self.dirs['data']+self.files['rsg']['interp']
+            models = {}
             if os.path.exists(pfile):
                 models = pickle.load(open(pfile, 'rb'))
                 # Remove inst_filt pairs that we don't need to calculate
@@ -693,7 +709,6 @@ class sed_fitter(object):
 
             bar.finish()
 
-            models = {}
             params = (tau_Vval, 10**Lval, Tval, Tdval)
             for val in inst_filt:
                 models[val] = interpolate.RegularGridInterpolator(params,
@@ -747,6 +762,8 @@ class sed_fitter(object):
                 filename = 'ATLAS.'+filt.lower()+'.dat'
             elif ('asassn' in inst):
                 filename = 'ASASSN.'+filt.lower()+'.dat'
+            elif ('decam' in inst):
+                filename = 'DECAM.'+filt.lower()+'.dat'
 
             file = bpdir + filename
             if not os.path.exists(file):
@@ -850,7 +867,12 @@ class sed_fitter(object):
             mags = np.array([np.asscalar(self.models[i](lum, np.log10(temp)))
                 for i in inst_filt])
         elif self.model_type=='rsg':
-            tau_V, L, Teff, Td = args
+            if len(args)==2:
+                L, Teff = args
+                tau_V = 0.01
+                Td = 200.
+            else:
+                tau_V, L, Teff, Td = args
             scaled_L = 10**L
             mags = np.array([np.asscalar(self.models[i]((tau_V, scaled_L,
                 Teff, Td))) for i in inst_filt])
@@ -1240,7 +1262,11 @@ class sed_fitter(object):
         elif self.model_type=='blackbody': guess = np.array([4.4, 3500.])
         elif self.model_type=='pickles': guess = np.array([5.077, 6353.])
         elif self.model_type=='bpass': guess = np.array([19.0, 0.1, 0.6])
-        elif self.model_type=='rsg': guess = np.array([0.02, 3.8, 3200, 1000])
+        elif self.model_type=='rsg':
+            if self.options.notau:
+                guess = np.array([3.8, 3200])
+            else:
+                guess = np.array([0.02, 3.8, 3200, 1000])
         else:
             error = 'ERROR: unrecognized model type.  Exiting...'
             print(error)
@@ -1255,7 +1281,7 @@ class sed_fitter(object):
 
         return(init_pos)
 
-    def load_backend(self, model_type, phottable):
+    def load_backend(self, model_type, phottable, notau=False):
         # Formart objname from input filename
         objname = ''
         if 'name' in phottable.meta.keys():
@@ -1287,7 +1313,10 @@ class sed_fitter(object):
             if c in '1234567890': newname+=c
         newname = str(int(newname)%100207100213100237100267)
 
-        backfile = self.dirs['backends']+objname+'_'+self.model_type+'.h5'
+        if self.model_type=='rsg' and notau:
+            backfile = self.dirs['backends']+objname+'_rsg_notau.h5'
+        else:
+            backfile = self.dirs['backends']+objname+'_'+self.model_type+'.h5'
         if self.verbose:
             print('Backend file:',backfile)
             print('Backend name:',newname)
@@ -1382,8 +1411,9 @@ class sed_fitter(object):
     def run_emcee(self, phottable, sigma=1.0, nsteps=5000, nwalkers=100,
         guess_type='params'):
 
-        # Indicate start of mcmc iteration
         model_type = self.model_type
+
+        # Indicate start of mcmc iteration
         self.make_banner(f'Starting MCMC for {model_type}')
 
         # This returns an absolute magnitude and colors for comparison for
@@ -1397,7 +1427,9 @@ class sed_fitter(object):
         ndim = len(self.model_fit_params)
 
         # Load emcee backend
-        backend = self.load_backend(self.model_type, self.phottable)
+        if self.options: notau = self.options.notau
+        backend = self.load_backend(self.model_type, self.phottable,
+            notau=notau)
 
         # Decide if we're going to use an initial position from backend
         use_backend_pos = False
@@ -1487,7 +1519,8 @@ class sed_fitter(object):
             r=self.calculate_param_best_fit(radius, prob, ndim, 'radius')
 
         # Calculate dust parameters from model params
-        if model_type=='rsg' and not self.options.skipdust and self.verbose:
+        if (model_type=='rsg' and not self.options.skipdust and self.verbose
+            and not self.options.notau):
             print('\n\n')
             print('RSG dust parameters:')
             # Need to sample parameters first since this part takes a long time
@@ -1824,7 +1857,7 @@ def main():
 
         # Set model type and import photometry table, bandpasses
         # Input host extinction in (Av,Rv)
-        sed.set_model_type(model, extinction=opt.extinction)
+        sed.set_model_type(model, extinction=opt.extinction, notau=opt.notau)
         sed.phottable = sed.import_phottable(photfile)
         mjd, inst_filt, mag, magerr = sed.get_fit_parameters(sed.phottable)
         bandpasses = [sed.inst_filt_to_bandpass(i) for i in inst_filt]
@@ -1838,7 +1871,7 @@ def main():
 
         # Check if there is a backend for the current photometry table and model
         # and import or make one if there's not a current one
-        sed.backend = sed.load_backend(model, sed.phottable)
+        sed.backend = sed.load_backend(model, sed.phottable, notau=opt.notau)
 
         # Get an initial guess for the model parameter values and compute the
         # model magnitudes and chi^2 for those model parameters

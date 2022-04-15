@@ -13,6 +13,7 @@ from astropy import units as u
 from astropy.cosmology import Planck15 as cosmo
 from astropy.io import ascii
 
+import astroquery
 from astroquery.mast import Observations
 from astroquery.ned import Ned
 from astroquery.vizier import Vizier
@@ -57,7 +58,7 @@ email_args = {
     'from_addr': 'Supernova Progenitor Alerts',
     'smtpserver': '%s:%s' % ('smtp.gmail.com', 587),
     'gmail_login': 'hst.supernovae@gmail.com',
-    'gmail_password': 'eXhS%Z8QsQz363$WY6k$U#Mr',
+    'gmail_password': 'okwqoshxzbokebxz',
     'to_addr': 'ckilpatrick@northwestern.edu',
     'subject': 'Supernova Progenitor Target Summary'
 }
@@ -84,8 +85,9 @@ def sendEmail(from_addr, to_addr, subj, message, login, password, smtpserver):
             server.login(login, password)
             resp = server.sendmail(from_addr, [to_addr], msg.as_string())
             print('Send email success: {0}'.format(to_addr))
-        except:
+        except Exception as e:
             print('Send email fail: {0}'.format(to_addr))
+            print('ERROR:',e)
 
     return(1)
 
@@ -543,7 +545,7 @@ def get_classification(row, table=None):
 
     if objtype:
         if objtype.upper() in ['NOVA','LBV','LRN','CANDIDATE','ILRT',
-            'LBV TO IIN']:
+            'LBV TO IIN','TDE']:
             return(objtype)
 
         if not objtype.upper().startswith('SN'):
@@ -757,6 +759,9 @@ def get_yse_targets():
         return(None)
     if r.status_code==200:
         table = ascii.read(r.text)
+        for key in table.keys():
+            if 'name' in key:
+                table.rename_column(key, 'name')
         return(table)
     else:
         return(None)
@@ -769,6 +774,9 @@ def get_yse_target_photometry():
         return(None)
     if r.status_code==200:
         table = ascii.read(r.text)
+        for key in table.keys():
+            if 'name' in key:
+                table.rename_column(key, 'name')
         return(table)
     else:
         return(None)
@@ -1045,7 +1053,7 @@ def gather_type(sndata, sn_type):
                   'Type IIn': ['LBV','SN IIn','SN IIn/LBV','SN IIn-pec/LBV',
                     'SN LBV to IIn','LBV to IIn'],
                   'Type IIb': ['SN IIb'],
-                  'Other': ['ILRT','LRN','SN','Nova'],}
+                  'Other': ['ILRT','LRN','SN','Nova','TDE'],}
 
     new_table = sndata[sn_type].copy()[:0]
     new_table.meta = {}
@@ -1071,7 +1079,10 @@ def gather_type(sndata, sn_type):
 def get_hst(row, table=None):
     data = check_dict(table.meta, [row['Name'],'hst','data'])
     if data:
-        return(np.sum(data['exptime'].data))
+        exptime = np.sum(data['exptime'].data)
+        exptime = '%10.2f'%exptime
+        exptime = exptime.strip()
+        return(exptime)
 
     return(0)
 

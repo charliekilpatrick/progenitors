@@ -92,6 +92,9 @@ class sed_plot(object):
         parser.add_argument('model', type=str,
             help='Types of plot to make, can be comma-separated to make '+\
             'multiple plots [hr|sed|cmd|corner|lightcurve]')
+        parser.add_argument('--notau', default=False, action='store_true',
+            help='For the RSG model, set this flag to ignore tau_V and Tdust '+\
+            ' parameters as part of fit.')
 
         return(parser)
 
@@ -106,7 +109,8 @@ class sed_plot(object):
             ' erg s'+r'$^{-1}$'+' cm'+r'$^{-2}$~\AA$^{-1}$')
         return(title)
 
-    def load_sed(self, model, photfile, file='', extinction=False):
+    def load_sed(self, model, photfile, file='', extinction=False,
+        notau=False):
 
         # Set model type and import photometry table, bandpasses
         self.fit.set_model_type(model, extinction=extinction)
@@ -123,10 +127,12 @@ class sed_plot(object):
 
         # Check if there is a backend for the current photometry table and model
         # and import or make one if there's not a current one
-        self.fit.backend = self.fit.load_backend(model, self.fit.phottable)
+        self.fit.backend = self.fit.load_backend(model, self.fit.phottable,
+            notau=notau)
 
 
-    def plot_sed(self, models, fluxspace=True, extinction=False, **kwargs):
+    def plot_sed(self, models, fluxspace=True, extinction=False,
+        notau=False, **kwargs):
 
         phot = self.fit.phottable
         dum, inst_filt, mag, magerr = self.fit.get_fit_parameters(phot)
@@ -144,10 +150,12 @@ class sed_plot(object):
         for i,model in enumerate(models):
 
             print('Plotting model:',model)
-            self.load_sed(model, self.fit.filename, extinction=extinction)
+            self.load_sed(model, self.fit.filename, extinction=extinction,
+                notau=notau)
 
-            self.fit.backend = self.fit.load_backend(model, self.fit.phottable)
-            self.fit.backend = self.fit.load_backend(model, phot)
+            self.fit.backend = self.fit.load_backend(model, self.fit.phottable,
+                notau=notau)
+            #self.fit.backend = self.fit.load_backend(model, phot)
             params = self.fit.get_guess(model, guess_type='params')
             ext = self.fit.get_guess(model, guess_type='blobs')
 
@@ -165,11 +173,15 @@ class sed_plot(object):
                 sp.convert('flam')
                 sp = S.ArraySpectrum(sp.wave, sp.flux/1.086)
             elif model=='rsg':
+                if len(params)==2:
+                    title = 'RSG'
+                    params = [0.01,params[0],params[1],200.]
+                else:
+                    label = 'RSG + {0} K dust'
+                    dust_temp = int(truncate(params[3],-2))
+                    title = label.format(dust_temp)
+
                 sp = self.fit.create_rsg(*params)
-                label = 'RSG + {0} K dust'
-                # Round dust temp to hundreds place
-                dust_temp = int(truncate(params[3],-2))
-                title = label.format(dust_temp)
 
 
             # Spectra should be scaled to absolute magnitudes, so flux at 10 pc,
@@ -186,7 +198,7 @@ class sed_plot(object):
                 # Now calculate observed flux and re-generate spectrum
                 obsflux = sp.flux*extinction1.flux*extinction2.flux
                 obsflux = obsflux/(distance**2)
-                sp = S.ArraySpectrum(sp.wave, obsflux)
+                sp = S.ArraySpectrum(sp.wave, 3.2*obsflux)
 
             # Get wavelengths for inst_filt and spectrum
             wave, width = self.fit.get_wavelength_widths(sp, bandpasses)
@@ -253,8 +265,8 @@ class sed_plot(object):
         ax.set_yticks(ytickval, minor=True)
         ax.set_yticklabels(yticklabel, minor=True)
 
-        if xlim[1] > 1.0e5:
-            xlim[1]=1.0e5
+        if xlim[1] > 5.0e4:
+            if xlim[1]>1.0e5: xlim[1]=1.0e5
             ax.set_xlim(xlim)
             ax.set_xscale('log')
 
@@ -961,7 +973,7 @@ class sed_plot(object):
 
         self.close_plot(plot_title)
 
-    def plot_corner(self, models, plot_blobs=False, **kwargs):
+    def plot_corner(self, models, plot_blobs=False, notau=False, **kwargs):
         phot = self.fit.phottable
         dum, inst_filt, mag, magerr = self.fit.get_fit_parameters(phot)
         # Get flux for observations in Janskies
@@ -975,7 +987,7 @@ class sed_plot(object):
         for i,model in enumerate(models):
 
             print('Plotting model:',model)
-            self.load_sed(model, self.fit.filename)
+            self.load_sed(model, self.fit.filename, notau=notau)
 
             npad = 0.006
 
@@ -1100,7 +1112,7 @@ def main():
         print(f'ERROR: input photfile {inpfile} does not exist!  Exiting...')
         sys.exit(1)
 
-    sed.load_sed('blackbody', photfile)
+    sed.load_sed('blackbody', photfile, notau=sed.options.notau)
 
     for typ in opt.type.split(','):
         if typ not in sed.plot_types.keys():
