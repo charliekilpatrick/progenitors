@@ -797,6 +797,7 @@ def add_yse_targets(sndata):
         if specclass=='SN IIb': add_key = 'Type IIb'
         if specclass=='SN Ib': add_key = 'Type Ib/c'
         if specclass=='SN Ic': add_key = 'Type Ib/c'
+        if specclass=='SN Ib Pec': add_key = 'Type Ib/c'
         if specclass=='SN Ic-BL': add_key = 'Type Ib/c'
         if specclass=='SN IIP': add_key = 'Type II-P/II-L'
         if specclass=='SN IIL': add_key = 'Type II-P/II-L'
@@ -856,7 +857,7 @@ def add_metadata(table, method, redo=False):
             print('No name')
         elif method not in table.meta[row['Name']].keys():
             redo = True
-            print('No method')
+            print(f'{method}, No method')
         elif (table.meta[row['Name']][method] is None or
               table.meta[row['Name']][method]=={}):
             redo = True

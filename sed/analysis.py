@@ -1107,6 +1107,8 @@ class sed_fitter(object):
                 inst_key = 'ACS_HRC'
             elif 'WFPC2' in inst:
                 inst_key = 'WFPC2'
+            else:
+                continue
 
             key = inst_key+'_'+filt
 
@@ -1155,6 +1157,8 @@ class sed_fitter(object):
                     if bpass_type=='terminal':
                         row = cmd_table[-1]
                         for key,filt in zip(photkeys,filts):
+                            if filt.lower() not in filtmap.keys():
+                                continue
                             colnum = filtmap[filt.lower()]
                             mag = row['col'+str(colnum+1)]
                             table[idx][key]=mag
@@ -1207,6 +1211,8 @@ class sed_fitter(object):
                     mags.append(float('NaN'))
                 else:
                     mags.append(mag1-mag2)
+            elif data not in row.colnames:
+                mags.append(float('NaN'))
             elif float(row[data])==99.0:
                 mags.append(float('NaN'))
             else:
