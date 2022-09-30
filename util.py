@@ -571,6 +571,7 @@ def get_classification_mask(table):
 
     pre_exp_mask = []
     for row in table:
+        print(row['Discovery Date'])
         disc_time = Time(row['Discovery Date'])
         data = check_dict(table.meta, [row['Name'],'hst','data'])
         if data:
