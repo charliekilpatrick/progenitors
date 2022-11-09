@@ -5,6 +5,7 @@ import pandas
 import json
 import os
 import re
+import copy
 from collections import OrderedDict
 from astropy.coordinates import SkyCoord
 from astropy.table import Table, Column, unique
@@ -419,6 +420,7 @@ def get_hst_data(row, table=None):
     productlist = get_productlist(coord, radius)
 
     if not productlist:
+        print('ERROR: bad HST dict')
         return({'error': 'bad dict'})
     else:
         return({'data': productlist})
@@ -444,7 +446,10 @@ def get_osc_data(row, table=None):
         except requests.exceptions.ConnectionError:
             return(output)
         if r.status_code==200:
-            data = json.loads(r.content)
+            try:
+                data = json.loads(r.content)
+            except json.decoder.JSONDecodeError:
+                return(output)
             data = data[objname]
 
             if 'alias' in data.keys():
@@ -571,7 +576,9 @@ def get_classification_mask(table):
 
     pre_exp_mask = []
     for row in table:
-        print(row['Discovery Date'])
+        if not row['Discovery Date']:
+            pre_exp_mask.append(False)
+            continue
         disc_time = Time(row['Discovery Date'])
         data = check_dict(table.meta, [row['Name'],'hst','data'])
         if data:
@@ -795,6 +802,7 @@ def add_yse_targets(sndata):
         specclass = row['TNS_spec_class']
         add_key = 'Other'
         if specclass=='SN Ia': add_key = 'Type Ia'
+        if specclass=='SN Iax[02cx-like]': add_key = 'Type Ia'
         if specclass=='SN IIb': add_key = 'Type IIb'
         if specclass=='SN Ib': add_key = 'Type Ib/c'
         if specclass=='SN Ic': add_key = 'Type Ib/c'
@@ -832,7 +840,7 @@ def add_yse_targets(sndata):
 
         email_summary = 'New Supernova Progenitor Target<br>'
         email_summary += '{0}<br>'.format(row['name'])
-        email_summary += '{0}<br>'.format(add_key)
+        email_summary += '{0}<br>'.format(specclass)
         email_summary += 'z={0}<br>'.format(row['redshift'])
         email_summary += '{0}<br>'.format(date_str)
 
@@ -843,11 +851,13 @@ def add_yse_targets(sndata):
 
 def add_metadata(table, method, redo=False):
 
+    orig_redo = copy.copy(redo)
     for row in table:
         method=method.lower()
 
-        print('Getting {0} data for {1}'.format(method, row['Name']))
+        print('Getting {0} data for {1}, {2}'.format(method, row['Name'], redo))
 
+        redo = copy.copy(orig_redo)
         if method not in get_metadata.keys():
             warning = 'WARNING: bad metadata method {0}'
             print(warning.format(method))
@@ -862,14 +872,14 @@ def add_metadata(table, method, redo=False):
         elif (table.meta[row['Name']][method] is None or
               table.meta[row['Name']][method]=={}):
             redo = True
-            print('Method is None')
+            print(f'Method {method} is None')
         elif ('error' in table.meta[row['Name']][method].keys() and
             (table.meta[row['Name']][method]['error'] in ['timeout',
                 'timeout data', 403, 'bad dict','no candidates'])):
             redo = True
             print('Error',table.meta[row['Name']][method]['error'])
         else:
-            print(table.meta[row['Name']][method].keys())
+            print(table.meta[row['Name']][method].keys(), redo)
 
         if redo:
             print('Redoing (or doing, whatever)...')
@@ -1050,7 +1060,7 @@ def gather_type(sndata, sn_type):
                     'SN Ia-02cx','SN Ia-91bg-like','SN Ia-91T',
                     'SN Ia-pec','SN I','SN Iax[02cx-like]'],
                   'Type Ib/c': ['SN Ib','SN Ic','SN Ib/c','SN Ic BL',
-                    'SN Ic-BL','SN Ib-pec','SN Ibn'],
+                    'SN Ic-BL','SN Ib-pec','SN Ibn','SN Ib Pec'],
                   'Type II-P/II-L': ['SN II','SN II P','SN IIP'],
                   'Type IIn': ['LBV','SN IIn','SN IIn/LBV','SN IIn-pec/LBV',
                     'SN LBV to IIn','LBV to IIn'],

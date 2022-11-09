@@ -7,8 +7,8 @@ import os, sys, copy, pickle, numpy as np
 basedir='/home/ckilpatrick/scripts/python/progenitors/'
 params = {
     'SHEET':'1paDfeYsJyv9X_XL26gV9Pk2xF9VjG70T4Wly5lRPuxs',
-    'token':basedir+'token.pickle',
-    'credentials':basedir+'credentials.json',
+    'token': os.environ['PROG_TOKEN'],#basedir+'token.pickle',
+    'credentials': os.environ['PROG_CREDENTIALS'],#basedir+'credentials.json',
     'target': basedir,
     'yse': {'user': 'ckilpatrick', 'password': 'Vfg190OW@K9E*g4$Bpmw'},
     'cols': ['Name',   'YSEPZ',   'TNS', 'OSC', 'RA',  'Dec',
@@ -194,6 +194,9 @@ def load_metadata_from_file(all_data, directory):
 def save_metadata_to_file(all_data, directory):
     for key in all_data.keys():
         savekey = key.replace(' ','_').replace('-','_').replace('/','_')
-        with open(directory+savekey+'.pkl','wb') as f:
+        if not os.path.exists(directory):
+            os.makedirs(directory)
+        fulloutname = os.path.join(directory, savekey+'.pkl')
+        with open(fulloutname, 'wb') as f:
             pickle.dump(all_data[key].meta, f)
 

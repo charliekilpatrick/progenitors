@@ -21,6 +21,7 @@ def main(redo=False, download_yse=True, update_classification=False):
 
         # Update type_data with new information from OSC, TNS, YSEPZ, NED
         for dattype in ['ned','distance','tns','osc','yse','ads','hst']:
+            print(redo)
             update = util.add_metadata(sndata[type_key], dattype, redo=redo)
             if vars(update)!=vars(sndata[type_key]):
                 sndata[type_key]=copy.copy(update)
