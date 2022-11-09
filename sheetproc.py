@@ -4,13 +4,14 @@ from google.auth.transport.requests import Request
 from astropy.table import Table
 import os, sys, copy, pickle, numpy as np
 
-basedir='/home/ckilpatrick/scripts/python/progenitors/'
+basedir=os.path.realpath(__file__)
 params = {
-    'SHEET':'1paDfeYsJyv9X_XL26gV9Pk2xF9VjG70T4Wly5lRPuxs',
-    'token': os.environ['PROG_TOKEN'],#basedir+'token.pickle',
-    'credentials': os.environ['PROG_CREDENTIALS'],#basedir+'credentials.json',
+    'SHEET':os.environ['PROGENITORS_SHEET'],
+    'token':os.path.join(basedir, 'token.pickle'),
+    'credentials':os.path.join(basedir, 'credentials.json'),
     'target': basedir,
-    'yse': {'user': 'ckilpatrick', 'password': 'Vfg190OW@K9E*g4$Bpmw'},
+    'yse': {'user': os.environ['YSE_USER'],
+            'password': os.environ['YSE_PASSWORD']},
     'cols': ['Name',   'YSEPZ',   'TNS', 'OSC', 'RA',  'Dec',
         'Classification', 'Host',    'NED',
         'Discovery Date','HST','Spectrum','Distance','Distance Method',

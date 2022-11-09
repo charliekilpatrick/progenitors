@@ -29,16 +29,17 @@ warnings.filterwarnings('ignore')
 Ned.TIMEOUT=30
 Vizier.ROW_LIMIT = -1
 
-basedir='/home/ckilpatrick/scripts/python/progenitors/'
+basedir=os.path.realpath(__file__)
 params = {
-    'SHEET':'1paDfeYsJyv9X_XL26gV9Pk2xF9VjG70T4Wly5lRPuxs',
-    'SHEET_TEST': '1ZTASxDCwj7H_rcjK1rU4Vi-FnnNkiaU5hoMggr0pn3o',
-    'token':'/home/ckilpatrick/scripts/python/progenitors/token.pickle',
-    'target': '/home/ckilpatrick/scripts/python/progenitors/',
-    'tns': {'api_key': 'eaa6718c10187b6980f52bac3d79e8f5e9ba8e0f'},
-    'yse': {'user': 'ckilpatrick', 'password': 'Vfg190OW@K9E*g4$Bpmw'},
-    'metadata': basedir+'metadata/',
-    'extinction': basedir+'extinction/',
+    'SHEET':os.environ['PROGENITORS_SHEET'],
+    'SHEET_TEST':os.environ['PROGENITORS_SHEET_TEST'],
+    'token':os.path.join(basedir, 'token.pickle'),
+    'target': basedir,
+    'tns': {'api_key': os.environ['TNS_API_KEY']},
+    'yse': {'user':os.environ['YSE_USER'],
+            'password':os.environ['YSE_PASSWORD']},
+    'metadata': os.path.join(basedir, 'metadata'),
+    'extinction': os.path.join(basedir,'extinction'),
 }
 
 dm_hierarchy = [{'name':'Cepheids','keys':['Cepheids','Cepheid']},
@@ -52,15 +53,14 @@ dm_hierarchy = [{'name':'Cepheids','keys':['Cepheids','Cepheid']},
                     'keys':['PNLF']},
                 {'name':'Ring Diameter','keys':['Ring Diameter']}]
 
-authcode='GGLWYREIaQMBDac8dfrKKm5KIdm3yj88IEGclIaL'
-ads_headers={'Authorization': 'Bearer '+authcode}
+ads_headers={'Authorization': 'Bearer '+os.environ['ADS_AUTHCODE']}
 
 email_args = {
     'from_addr': 'Supernova Progenitor Alerts',
     'smtpserver': '%s:%s' % ('smtp.gmail.com', 587),
-    'gmail_login': 'hst.supernovae@gmail.com',
-    'gmail_password': 'okwqoshxzbokebxz',
-    'to_addr': 'ckilpatrick@northwestern.edu',
+    'gmail_login': os.environ['GMAIL_LOGIN'],
+    'gmail_password': os.environ['GMAIL_PASSWORD'],
+    'to_addr': os.environ['MY_EMAIL'],
     'subject': 'Supernova Progenitor Target Summary'
 }
 
