@@ -4,7 +4,7 @@ from google.auth.transport.requests import Request
 from astropy.table import Table
 import os, sys, copy, pickle, numpy as np
 
-basedir=os.path.realpath(__file__)
+basedir=os.path.split(os.path.realpath(__file__))[0]
 params = {
     'SHEET':os.environ['PROGENITORS_SHEET'],
     'token':os.path.join(basedir, 'token.pickle'),
@@ -12,9 +12,11 @@ params = {
     'target': basedir,
     'yse': {'user': os.environ['YSE_USER'],
             'password': os.environ['YSE_PASSWORD']},
-    'cols': ['Name',   'YSEPZ',   'TNS', 'OSC', 'RA',  'Dec',
+    'cols': ['Name',   'YSEPZ',   'TNS', 'RA',  'Dec',
         'Classification', 'Host',    'NED',
-        'Discovery Date','HST','Spectrum','Distance','Distance Method',
+        'Discovery Date','HST (pre-explosion)','HST (post-explosion)',
+        'JWST (pre-explosion)','JWST (post-explosion)',
+        'Spectrum','Distance','Distance Method',
         'Ref. (Distance)', 'Redshift',    'Ref. (Discovery)',
         'Ref. (Classification)',   'Post-Explosion']
 }
@@ -85,11 +87,13 @@ def download_progenitor_data(spreadsheetId):
 
         return(alldata)
 
-def convert_table_to_lists(table):
+def convert_table_to_lists(table, mask=None):
 
     output = [params['cols']]
 
-    for row in table:
+    for i,row in enumerate(table):
+        if mask is not None and mask[i]:
+            continue
         add_row = []
         for k in output[0]:
             if k in row.colnames: add_row.append('\''+str(row[k]))
@@ -106,7 +110,12 @@ def upload_progenitor_data(spreadsheetId, all_tables, mask=False):
     if response and 'sheets' in response.keys():
 
         for key in all_tables.keys():
-            table_data = convert_table_to_lists(all_tables[key])
+            mask_vals = None
+            if mask and 'mask' in all_tables[key].meta.keys():
+                mask_vals = all_tables[key].meta['mask']
+
+            table_data = convert_table_to_lists(all_tables[key], mask=mask_vals)
+
             sheetid = [s['properties']['sheetId'] for s in response['sheets']
                 if s['properties']['title']==key]
 
@@ -134,9 +143,9 @@ def upload_progenitor_data(spreadsheetId, all_tables, mask=False):
                           'sheetId': sheetid,
                           'dimension': 'ROWS',
                           'startIndex': 0,
-                          'endIndex': 199,},
-                        'properties': {'hiddenByUser': False,},
-                        'fields': 'hiddenByUser',}}]}
+                          'endIndex': 9999,},
+                          'properties': {'hiddenByUser': False,},
+                          'fields': 'hiddenByUser',}}]}
             dum = sheet.batchUpdate(spreadsheetId=spreadsheetId,
                   body=body).execute()
 
@@ -152,34 +161,10 @@ def upload_progenitor_data(spreadsheetId, all_tables, mask=False):
             result = sheet.values().update(spreadsheetId=spreadsheetId,
                 range=key, valueInputOption='USER_ENTERED', body=body).execute()
 
-            # Mask if adding mask
-            if mask and 'mask' in all_tables[key].meta.keys():
-                reqs = []
-                for idx in np.where(all_tables[key].meta['mask'])[0]:
-                    req={
-                      'updateDimensionProperties': {
-                        'range': {
-                          'sheetId': sheetid,
-                          'dimension': 'ROWS',
-                          'startIndex': int(idx)+1,
-                          'endIndex': int(idx)+2,
-                        },
-                        'properties': {
-                          'hiddenByUser': True,
-                        },
-                        'fields': 'hiddenByUser',
-                    }}
-                    reqs.append(req)
-
-                if len(reqs)>0:
-                    body = {'requests': reqs}
-                    dum = sheet.batchUpdate(spreadsheetId=spreadsheetId,
-                      body=body).execute()
-
 def load_metadata_from_file(all_data, directory):
     for key in all_data.keys():
         savekey = key.replace(' ','_').replace('-','_').replace('/','_')
-        file = directory+savekey+'.pkl'
+        file = os.path.join(directory, savekey+'.pkl')
         print('Loading metadata from:',file)
         if os.path.exists(file):
             try:
@@ -192,12 +177,19 @@ def load_metadata_from_file(all_data, directory):
 
     return(all_data)
 
-def save_metadata_to_file(all_data, directory):
+def save_metadata_to_file(all_data, directory, make_backup=False):
     for key in all_data.keys():
         savekey = key.replace(' ','_').replace('-','_').replace('/','_')
         if not os.path.exists(directory):
             os.makedirs(directory)
         fulloutname = os.path.join(directory, savekey+'.pkl')
+        backupname = os.path.join(directory, 'backup', savekey+'.backup.pkl')
+        print(f'Saving {key} data to {fulloutname}')
         with open(fulloutname, 'wb') as f:
             pickle.dump(all_data[key].meta, f)
+        if make_backup:
+            if not os.path.exists(os.path.join(directory, 'backup')):
+                os.makedirs(os.path.join(directory, 'backup'))
+            with open(backupname, 'wb') as f:
+                pickle.dump(all_data[key].meta, f)
 

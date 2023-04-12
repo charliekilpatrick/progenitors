@@ -6,9 +6,11 @@ import json
 import os
 import re
 import copy
+import sys
+import time
 from collections import OrderedDict
 from astropy.coordinates import SkyCoord
-from astropy.table import Table, Column, unique
+from astropy.table import Table, Column, unique, vstack
 from astropy.time import Time
 from astropy import units as u
 from astropy.cosmology import Planck15 as cosmo
@@ -29,13 +31,15 @@ warnings.filterwarnings('ignore')
 Ned.TIMEOUT=30
 Vizier.ROW_LIMIT = -1
 
-basedir=os.path.realpath(__file__)
+basedir=os.path.split(os.path.realpath(__file__))[0]
 params = {
     'SHEET':os.environ['PROGENITORS_SHEET'],
     'SHEET_TEST':os.environ['PROGENITORS_SHEET_TEST'],
     'token':os.path.join(basedir, 'token.pickle'),
     'target': basedir,
-    'tns': {'api_key': os.environ['TNS_API_KEY']},
+    'tns': {'api_key': os.environ['TNS_API_KEY'],
+            'bot_name': os.environ['TNS_BOT_NAME'],
+            'bot_id': os.environ['TNS_BOT_ID']},
     'yse': {'user':os.environ['YSE_USER'],
             'password':os.environ['YSE_PASSWORD']},
     'metadata': os.path.join(basedir, 'metadata'),
@@ -95,6 +99,8 @@ def sendEmail(from_addr, to_addr, subj, message, login, password, smtpserver):
 def is_number(val):
     try:
         val = float(val)
+        if np.isnan(float(val)):
+            return(False)
         return(True)
     except (ValueError, TypeError):
         return(False)
@@ -109,17 +115,34 @@ def check_dict(dic, keys):
 
     return(dic)
 
+def get_tns_header():
+
+    bot_id = params['tns']['bot_id']
+    bot_name = params['tns']['bot_name']
+
+    tns_marker = 'tns_marker{"tns_id": "'+bot_id
+    tns_marker += '", "type": "bot", "name": "'+bot_name+'"}'
+
+    headers = {'User-Agent': tns_marker}
+
+    return(headers)
+
+
 def search_tns(coord, radius=5):
+
+    headers = get_tns_header()
+
     ra, dec = coord.to_string(style='hmsdms', sep=':', precision=3).split()
     data = {'ra': ra, 'dec': dec, 'radius': str(radius)}
 
     json_file=OrderedDict(data)
-    post_data=[('api_key',(None, params['tns']['api_key'])),
-                      ('data',(None,json.dumps(json_file)))]
+
+    api_key = params['tns']['api_key']
+    search_data = {'api_key': api_key, 'data': json.dumps(json_file)}
 
     url='https://www.wis-tns.org/api/get/search'
 
-    response=requests.post(url, files=post_data)
+    response = requests.post(url, headers=headers, data=search_data)
 
     if response.status_code==200:
         out=json.loads(response.content)
@@ -129,16 +152,24 @@ def search_tns(coord, radius=5):
     return('')
 
 def get_tns_data(row, table=None):
-    USER_ID='97993'
-    USER_NAME='YSE_progenitors'
+
+    headers = get_tns_header()
+
     data = {'objname': row['Name'], 'spectra': '1', 'photometry': '1'}
-    headers={'User-Agent':'tns_marker{"tns_id":'+str(USER_ID)+\
-        ', "type":"bot", "name":"'+USER_NAME+'"}'}
+
     json_file=OrderedDict(data)
-    post_data=[('api_key',(None, params['tns']['api_key'])),
-               ('data',(None,json.dumps(json_file)))]
+
+    api_key = params['tns']['api_key']
+    search_data = {'api_key': api_key, 'data': json.dumps(json_file)}
+
     url='https://www.wis-tns.org/api/get/object'
-    r=requests.post(url, files=post_data, headers=headers)
+
+    print(url)
+    print(headers)
+    print(search_data)
+
+    r = requests.post(url, headers=headers, data=search_data)
+
     if r.status_code==200:
         out = json.loads(r.content)
         out = check_dict(out, ['data','reply'])
@@ -158,7 +189,11 @@ def get_tns_data(row, table=None):
         return(out)
     else:
         print(r.status_code)
-        print(r.content)
+        if isinstance(r.content, bytes):
+            print(json.loads(r.content.decode('utf8')))
+        else:
+            print(json.loads(r.content))
+        time.sleep(60)
 
     return({'error': 'timeout data'})
 
@@ -204,8 +239,15 @@ def parse_coord(ra, dec):
 def get_coord(row):
 
     coord = None
-    if 'RA' in row.colnames and 'Dec' in row.colnames:
-        coord = parse_coord(row['RA'], row['Dec'])
+    try:
+        if 'RA' in row.colnames and 'Dec' in row.colnames:
+            coord = parse_coord(row['RA'], row['Dec'])
+    except AttributeError:
+        try:
+            if 'RA' in row.keys() and 'Dec' in row.keys():
+                coord = parse_coord(row['RA'], row['Dec'])
+        except:
+            pass
 
     return(coord)
 
@@ -275,6 +317,10 @@ def get_yse_data(row, table=None):
 
 def add_data(table, add_key):
 
+    if add_key not in get_data.keys():
+        # Don't need to do anything - these are in table by default
+        return(table)
+
     if add_key not in table.keys():
         newcol = []
         for row in table:
@@ -337,6 +383,15 @@ def check_glade(row, table=None):
     result = result['GWGC','HyperLEDA','z','RAJ2000','DEJ2000','Dist','BMAG',
         'Bmag']
 
+    mask = result['Bmag']>0
+    result = result[mask]
+
+    for i,row in enumerate(result):
+        if ((result['GWGC'].mask[i] or row['GWGC']=='---')
+            and ~result['HyperLEDA'].mask[i]):
+            result[i]['GWGC']=row['HyperLEDA']
+            result['GWGC'].mask[i]=False
+
     for i,row in enumerate(result):
         if (result['BMAG'].mask[i] and ~result['Bmag'].mask[i] and
             ~result['Dist'].mask[i]):
@@ -344,17 +399,19 @@ def check_glade(row, table=None):
             result['BMAG'][i]=result['Bmag'][i]-dm
             result['BMAG'].mask[i]=False
 
-
     # Add objects because GLADE does not contain M31, M33
     result.add_row(['M31','M31',-0.001001,10.6847929,
         41.2690650,0.731,-20.10,4.22])
     result.add_row(['M33','M33',-0.000597,23.4620417,
         30.6602222,0.832,-18.31,6.29])
+    result.add_row(['LMC','LMC',0.000011,80.85,-69.76,0.04997,-17.75,0.74])
 
-    mask = ~result['GWGC'].mask & ~result['z'].mask & (result['GWGC']!='---')
+    mask = (~result['GWGC'].mask | ~result['HyperLEDA'].mask) &\
+        ~result['z'].mask
     result = result[mask]
 
     sep = []
+    sep_deg = []
     # Approximate separation in kpc
     distmask = result['Dist'].mask
     for i,row in enumerate(result):
@@ -367,11 +424,16 @@ def check_glade(row, table=None):
         else:
             dist = row['z']*100.0*43.4*1000.0
         sep.append(c1.separation(coord).radian * dist)
+        sep_deg.append(c1.separation(coord).degree)
 
     result.add_column(Column(sep, name='Separation'))
+    result.add_column(Column(sep_deg, name='Separation degree'))
 
     # Impose a cut at a projected separation of 50 kpc
     result = result[result['Separation']<50.0]
+
+    # Also impose a cut at a projected separation of 10 degrees
+    result = result[result['Separation degree']<10.0]
 
     if len(result)==0:
         return({'error': 'no candidates'})
@@ -384,7 +446,9 @@ def check_glade(row, table=None):
         output = {'name': best['GWGC'], 'ra': best['RAJ2000'],
                   'DEC': best['DEJ2000'], 'redshift': best['z'],
                   'error': None, 'distance': best['Dist'],
-                  'separation': best['Separation'], 'url': url}
+                  'separation': best['Separation'], 'url': url,
+                  'sep_deg': best['Separation degree']}
+
         return(output)
 
     mask = ~result['GWGC'].mask & ~result['z'].mask & ~result['BMAG'].mask &\
@@ -409,7 +473,8 @@ def check_glade(row, table=None):
     output = {'name': best['GWGC'], 'ra': best['RAJ2000'],
               'DEC': best['DEJ2000'], 'redshift': best['z'],
               'error': None, 'distance': best['Dist'],
-              'separation': best['Separation'], 'url': url}
+              'separation': best['Separation'], 'url': url,
+              'sep_deg': best['Separation degree']}
 
     return(output)
 
@@ -417,40 +482,103 @@ def get_hst_data(row, table=None):
     coord = get_coord(row)
     radius = 2.0 * u.arcmin
 
-    productlist = get_productlist(coord, radius)
+    productlist = get_productlist(coord, radius, table=table)
 
-    if not productlist:
-        print('ERROR: bad HST dict')
+    if productlist is None:
+        return({'error': 'bad dict'})
+    else:
+        return({'data': productlist})
+
+def get_jwst_data(row, table=None):
+    coord = get_coord(row)
+    radius = 2.0 * u.arcmin
+
+    productlist = get_productlist(coord, radius, obstype='JWST',
+        insts=['MIRI','MIRI/IMAGE','NIRCAM','NIRCAM/IMAGE'],
+        table=table)
+
+    if productlist is None:
         return({'error': 'bad dict'})
     else:
         return({'data': productlist})
 
 def get_osc_data(row, table=None):
 
-    output = {}
+    output = {'url':None, 'json': None,
+            'discovery_date':row['Discovery Date'],
+            'redshift':[],
+            'sources':[],
+            'classification_reference':[],
+            'classification':[],
+            'discovery_reference':[]}
+
     name = row['Name']
     if is_number(name[0]):
         tries = ['SN'+name,'AT'+name,name]
     else:
         tries = [name,'SN'+name,'AT'+name]
 
+    if not row['Discovery Date'].strip():
+        return(output)
+
+    t = Time(row['Discovery Date'])
+
+    # OSC repo does not contain new events after Apr 8, 2022, so return default
+    # if date is larger than Apr 8, 2022
+    if t > Time('2022-04-08T00:00:00'):
+        return(output)
+
+    # Can also ignore FRBs since they are not populated in OSC
+    classification = get_classification(row, table=table)
+    if classification in ['FRB']:
+        return(output)
+
+    disc_year = float(t.datetime.strftime('%Y'))
+    list_tries = []
+    if disc_year < 1990:
+        list_tries.append('sne-pre-1990')
+    elif disc_year < 2000:
+        list_tries.append('sne-1990-1999')
+    elif disc_year < 2005:
+        list_tries.append('sne-2000-2004')
+    elif disc_year < 2010:
+        list_tries.append('sne-2005-2009')
+    elif disc_year < 2015:
+        list_tries.append('sne-2010-2014')
+    elif disc_year < 2020:
+        list_tries.append('sne-2015-2019')
+    else:
+        list_tries.append('sne-2020-2024')
+
+    list_tries.append('sne-boneyard')
+
+
     for objname in tries:
         if 'ASASSN' in objname and 'ASASSN-' not in objname:
             objname = objname.replace('ASASSN','ASASSN-')
 
-        daturl = 'https://sne.space/astrocats/astrocats/supernovae/output/json/'
-        daturl += objname+'.json'
+        r=None
+        for lt in list_tries:
+            url=f'https://raw.githubusercontent.com/astrocatalogs/{lt}/master/{objname}.json'
+            try:
+                r = requests.get(url)
+                break
+            except requests.exceptions.ConnectionError:
+                url=f'https://raw.githubusercontent.com/astrocatalogs/{lt}/main/{objname}.json'
+                try:
+                    r = requests.get(url)
+                    break
+                except requests.exceptions.ConnectionError:
+                    pass
 
-        try:
-            r = requests.get(daturl)
-        except requests.exceptions.ConnectionError:
-            return(output)
-        if r.status_code==200:
+        if r is not None and r.status_code==200:
             try:
                 data = json.loads(r.content)
             except json.decoder.JSONDecodeError:
                 return(output)
+
             data = data[objname]
+            output['url']=url
 
             if 'alias' in data.keys():
                 for alias in data['alias']:
@@ -464,14 +592,6 @@ def get_osc_data(row, table=None):
                         if len(newdata.keys())>len(data.keys()):
                             daturl=newurl
                         data.update(newdata)
-
-
-            url=daturl.replace('/astrocats/astrocats/supernovae/output/json',
-                '/sne')
-            url=url.replace('.json','')
-
-            output['url']=url
-            output['json']=daturl
 
             # Split off relevant metadata into a single dictionary
             if 'photometry' in data.keys():
@@ -548,13 +668,29 @@ def get_classification(row, table=None):
         tns_class = tns_class.strip()
         objtype = tns_class
 
+    objtype = objtype.replace('?','')
+    objtype = objtype.replace('.','')
+
+
+
     if objtype:
         if objtype.upper() in ['NOVA','LBV','LRN','CANDIDATE','ILRT',
-            'LBV TO IIN','TDE']:
-            return(objtype)
+            'LBV TO IIN','TDE','FRB','OTHER','CV','VARSTAR']:
+            objtype=objtype
+        elif not objtype.upper().startswith('SN'):
+            objtype = f'SN {objtype}'
 
-        if not objtype.upper().startswith('SN'):
-            objtype = 'SN '+objtype
+        objtype_map = {'SN Ib (Ca rich)': ['SN Ib/Ic (Ca rich)',
+                                           'SN Ib-Ca-rich'],
+                       'SN II-P': ['SN IIP','SN II P'],
+                       'LBV': ['LBV to IIn','SN IIn/LBV'],
+                       'SN Iax': ['SN Ia-02cx','SN Iax[02cx-like]'],}
+
+        for key in objtype_map.keys():
+            if objtype in objtype_map[key]:
+                objtype = key
+                break
+
         return(objtype)
 
     return('')
@@ -566,36 +702,55 @@ def get_classification_mask(table):
 
     class_mask = []
     for row in table:
-        if row['Classification'].upper() in ['CANDIDATE','NOVA','SN','']:
+        if row['Classification'].upper() in ['CANDIDATE','NOVA','SN','',
+            'CV','VARSTAR','OTHER']:
             class_mask.append(True)
         elif not row['Classification'].strip():
             class_mask.append(True)
         else:
             class_mask.append(False)
+
     class_mask = np.array(class_mask)
 
     pre_exp_mask = []
     for row in table:
-        if not row['Discovery Date']:
-            pre_exp_mask.append(False)
-            continue
-        disc_time = Time(row['Discovery Date'])
-        data = check_dict(table.meta, [row['Name'],'hst','data'])
-        if data:
-            if 'start_time' not in row.colnames:
-                pre_exp_mask.append(True)
-                continue
-            times = Time(row['start_time'], format='mjd')
-            mask = times < disc_time
-            if len(data[mask])==0:
-                pre_exp_mask.append(True)
-            else:
-                pre_exp_mask.append(False)
-        else:
+        exptime = get_hst_pre(row, table=table)
+        if not exptime or float(exptime)==0.0 or np.isnan(float(exptime)):
             pre_exp_mask.append(True)
+        else:
+            pre_exp_mask.append(False)
+
     pre_exp_mask = np.array(pre_exp_mask)
 
-    mask = class_mask & pre_exp_mask
+    redshift_mask = []
+    for row in table:
+        redshift = get_redshift(row, table=table)
+        if not redshift:
+            redshift_mask.append(True)
+        elif not is_number(redshift):
+            redshift_mask.append(True)
+        elif float(redshift)>0.02:
+            redshift_mask.append(True)
+        else:
+            redshift_mask.append(False)
+
+    redshift_mask = np.array(redshift_mask)
+
+    distance_mask = []
+    for row in table:
+        output = get_best_distance(row, table=table)
+        if ('distance' not in output.keys() or
+            'distance_error' not in output.keys()):
+            distance_mask.append(True)
+        elif float(output['distance'])-float(output['distance_error'])>80.0:
+            distance_mask.append(True)
+        else:
+            distance_mask.append(False)
+
+    distance_mask = np.array(distance_mask)
+
+
+    mask = class_mask | pre_exp_mask | redshift_mask | distance_mask
 
     return(mask)
 
@@ -639,7 +794,12 @@ def get_host_distance(row, table=None):
     name = check_dict(table.meta, [row['Name'],'ned','name'])
 
     df = []
-    name = row['Host']
+    if name is None or not name:
+        name = row['Host']
+
+    # If there is not host data then can't do a search for NED data
+    if name is None or not name or name in ['---']:
+        return({})
 
     url = 'https://ned.ipac.caltech.edu/cgi-bin/nDistance?name={0}'
     name_fmt = name.strip().replace(' ','+')
@@ -660,6 +820,8 @@ def get_host_distance(row, table=None):
     if len(df)>1:
         table = Table.from_pandas(df[1])
         return({'table': table})
+    else:
+        return({'table': None})
 
     return({})
 
@@ -759,8 +921,9 @@ def get_redshift(row, table=None):
 
     return('')
 
-def get_yse_targets():
-    url = 'https://ziggy.ucolick.org/yse/explorer/160/download?format=csv'
+def get_yse_targets(yse_sql_query='160'):
+    url = 'https://ziggy.ucolick.org/yse/explorer/{0}/download?format=csv'
+    url = url.format(yse_sql_query)
     try:
         r = requests.get(url)
     except requests.exceptions.ConnectionError:
@@ -789,15 +952,21 @@ def get_yse_target_photometry():
     else:
         return(None)
 
-def add_yse_targets(sndata):
+def add_yse_targets(sndata, yse_sql_query='160'):
 
-    yse_targets = get_yse_targets()
+    yse_targets = get_yse_targets(yse_sql_query=yse_sql_query)
     if not yse_targets: return(sndata)
 
+    new_targets = 0
     for row in yse_targets:
 
         if any([row['name'] in sndata[key]['Name'] for key in sndata.keys()]):
             continue
+        # Check for data quality issues - will need to skip bad data format
+        if row['disc_date']=='--' or not row['disc_date']:
+            continue
+
+        new_targets += 1
 
         specclass = row['TNS_spec_class']
         add_key = 'Other'
@@ -811,16 +980,29 @@ def add_yse_targets(sndata):
         if specclass=='SN IIP': add_key = 'Type II-P/II-L'
         if specclass=='SN IIL': add_key = 'Type II-P/II-L'
         if specclass=='SN II': add_key = 'Type II-P/II-L'
+        if specclass=='SN II Pec': add_key = 'Type II-P/II-L'
         if specclass=='SN IIn': add_key = 'Type IIn'
         if specclass=='LBV': add_key = 'Type IIn'
+        if specclass=='SN Ia-91T-like': add_key = 'Type Ia'
+        if specclass=='AGN': add_key = 'Other'
+        if specclass=='Other': add_key = 'Other'
+        if specclass=='SLSN-I': add_key = 'Other'
+        if specclass=='SN IIn-pec': add_key = 'Type IIn'
+        if specclass=='SN Ib-Ca-rich': add_key = 'Type Ib/c'
+        if specclass=='SN Ib (Ca rich)': add_key = 'Type Ib/c'
+        if specclass=='FRB': add_key = 'Other'
+        if str(specclass)=='--': add_key = 'Other'
+        if specclass=='CV': add_key = 'Other'
+        if specclass=='SN Icn': add_key = 'Type Ib/c'
+        if specclass=='Varstar': add_key = 'Other'
+        if specclass=='SN Ia-CSM': add_key = 'Type Ia'
 
         coord = SkyCoord(row['transient_RA'], row['transient_Dec'], unit='deg')
         ra, dec = coord.to_string(style='hmsdms', sep=':', precision=3).split()
         date_str = Time(row['disc_date']).datetime.strftime('%Y-%m-%d %H:%M:%S')
 
-        add_table = sndata[add_key]
         new_row = []
-        for tab_key in add_table.keys():
+        for tab_key in sndata[add_key].keys():
             if tab_key=='Name': new_row.append(row['name'])
             elif tab_key=='RA': new_row.append(ra)
             elif tab_key=='Dec': new_row.append(dec)
@@ -828,43 +1010,63 @@ def add_yse_targets(sndata):
             elif tab_key=='Discovery Date': new_row.append(date_str)
             else: new_row.append('')
 
-        add_table.add_row(new_row)
-        sndata[add_key]=add_table
+        sndata[add_key].add_row(new_row)
 
-        # If yes, send an alert
-        from_addr = email_args['from_addr']
-        smtpserver = email_args['smtpserver']
-        gmail_login = email_args['gmail_login']
-        gmail_password = email_args['gmail_password']
-        email = email_args['to_addr']
-
-        email_summary = 'New Supernova Progenitor Target<br>'
-        email_summary += '{0}<br>'.format(row['name'])
-        email_summary += '{0}<br>'.format(specclass)
-        email_summary += 'z={0}<br>'.format(row['redshift'])
-        email_summary += '{0}<br>'.format(date_str)
-
-        resp=sendEmail(from_addr, email, email_args['subject'],
-            email_summary, gmail_login, gmail_password, smtpserver)
+    print(f'{new_targets} total new targets to add')
 
     return(sndata)
 
-def add_metadata(table, method, redo=False):
+def post_alert(row):
+
+    from_addr = email_args['from_addr']
+    smtpserver = email_args['smtpserver']
+    gmail_login = email_args['gmail_login']
+    gmail_password = email_args['gmail_password']
+    email = email_args['to_addr']
+
+    email_summary = 'New Supernova Progenitor Target<br>'
+    email_summary += '{0}<br>'.format(row['Name'])
+    email_summary += '{0}<br>'.format(row['Classification'])
+    email_summary += 'z={0}<br>'.format(row['Redshift'])
+    email_summary += '{0}<br>'.format(row['Discovery Date'])
+
+    resp=sendEmail(from_addr, email, email_args['subject'],
+        email_summary, gmail_login, gmail_password, smtpserver)
+
+def add_metadata(table, method, redo=False, redo_obj=None):
+
+    method=method.lower()
+
+    if method=='hst' and 'hst' not in table.meta.keys():
+        table.meta['hst']=None
+    if method=='jwst' and 'jwst' not in table.meta.keys():
+        table.meta['jwst']=None
+
+    if method not in get_metadata.keys():
+        warning = 'WARNING: bad metadata method {0}'
+        print(warning.format(method))
+        return(table)
+
+    if redo_obj is not None:
+        redo_obj = list(redo_obj.split(','))
+    else:
+        redo_obj = []
+
+    objs = list(table.meta.keys())
 
     orig_redo = copy.copy(redo)
     for row in table:
-        method=method.lower()
-
-        print('Getting {0} data for {1}, {2}'.format(method, row['Name'], redo))
-
         redo = copy.copy(orig_redo)
-        if method not in get_metadata.keys():
-            warning = 'WARNING: bad metadata method {0}'
-            print(warning.format(method))
-            continue
 
-        if row['Name'] not in table.meta.keys():
+        if row['Name'] in redo_obj: redo = True
+
+        print('Getting {0} data for {1}, redo={2}'.format(method, row['Name'],
+            redo))
+
+        if row['Name'] not in objs:
             redo = True
+            # Initialize dictionary
+            table.meta[row['Name']]={}
             print('No name')
         elif method not in table.meta[row['Name']].keys():
             redo = True
@@ -875,19 +1077,16 @@ def add_metadata(table, method, redo=False):
             print(f'Method {method} is None')
         elif ('error' in table.meta[row['Name']][method].keys() and
             (table.meta[row['Name']][method]['error'] in ['timeout',
-                'timeout data', 403, 'bad dict','no candidates'])):
+                'timeout data', 403, 'bad dict'])):#,'no candidates'])):
+            # Add back in no candidates for testing host association methods
+            # on the Glade catalog (or if a more complete catalog is added)
             redo = True
-            print('Error',table.meta[row['Name']][method]['error'])
-        else:
-            print(table.meta[row['Name']][method].keys(), redo)
+            print('Error',method,table.meta[row['Name']][method])
 
         if redo:
             print('Redoing (or doing, whatever)...')
             metadata = get_metadata[method](row, table=table)
-            if row['Name'] not in table.meta.keys():
-                table.meta[row['Name']]={method: metadata}
-            else:
-                table.meta[row['Name']][method]=metadata
+            table.meta[row['Name']][method]=metadata
 
     return(table)
 
@@ -897,7 +1096,8 @@ get_metadata = {'osc': get_osc_data,
                 'ned': check_glade,
                 'distance': get_host_distance,
                 'ads': get_ads_data,
-                'hst': get_hst_data,}
+                'hst': get_hst_data,
+                'jwst': get_jwst_data,}
 
 def get_ads_ref(row, table, typ):
 
@@ -1011,6 +1211,7 @@ def get_tns_source(row, tns_cert_type):
     return(source)
 
 def get_discovery_ref(row, table=None):
+    tns_source = None ; osc_source = None ; ads_source = None
     osc_source = get_osc_source(row, table, 'discovery_reference')
     if table:
         tns_source = check_dict(table.meta, [row['Name'],'tns',
@@ -1023,10 +1224,11 @@ def get_discovery_ref(row, table=None):
     return('')
 
 def get_type_ref(row, table=None):
+    tns_source = None ; osc_source = None ; ads_source = None
     osc_source = get_osc_source(row, table, 'classification_reference')
     if table:
         tns_source = check_dict(table.meta, [row['Name'],'tns',
-            'classification_reference'])
+                'classification_reference'])
     ads_source = get_ads_ref(row, table, 'classification')
 
     if osc_source: return(osc_source)
@@ -1058,21 +1260,31 @@ def gather_type(sndata, sn_type):
 
     type_index = {'Type Ia': ['SN Ia', 'SN Ia Pec', 'SN Ia-91bg',
                     'SN Ia-02cx','SN Ia-91bg-like','SN Ia-91T',
-                    'SN Ia-pec','SN I','SN Iax[02cx-like]'],
+                    'SN Ia-pec','SN I','SN Iax[02cx-like]',
+                    'SN Ia-91T-like','SN Ia-CSM', 'SN Iax'],
                   'Type Ib/c': ['SN Ib','SN Ic','SN Ib/c','SN Ic BL',
-                    'SN Ic-BL','SN Ib-pec','SN Ibn','SN Ib Pec'],
-                  'Type II-P/II-L': ['SN II','SN II P','SN IIP'],
+                    'SN Ic-BL','SN Ib-pec','SN Ibn','SN Ib Pec',
+                    'SN Ib-Ca-rich','SN Icn','SN Ib (Ca rich)',
+                    'SN Ib/Ic (Ca rich)'],
+                  'Type II-P/II-L': ['SN II','SN II P','SN IIP', 'SN II Pec',
+                    'SN II-P','SN II-L'],
                   'Type IIn': ['LBV','SN IIn','SN IIn/LBV','SN IIn-pec/LBV',
-                    'SN LBV to IIn','LBV to IIn'],
+                    'SN LBV to IIn','LBV to IIn','SN IIn-pec'],
                   'Type IIb': ['SN IIb'],
-                  'Other': ['ILRT','LRN','SN','Nova','TDE'],}
+                  'Other': ['ILRT','LRN','SN','Nova','TDE','--','AGN',
+                    'Other','SLSN-I','CV','Varstar','FRB'],}
 
     new_table = sndata[sn_type].copy()[:0]
     new_table.meta = {}
 
+    # Copy over previous metadata not associated with a specific object
+    for key in ['all_sndata', 'curr_table','mask','jwst','hst']:
+        if key in sndata[sn_type].meta.keys():
+            new_table.meta[key] = sndata[sn_type].meta[key]
+
     acceptable_types = type_index[sn_type]+['Candidate','']
     for row in sndata[sn_type]:
-        if row['Classification'] in acceptable_types:
+        if str(row['Classification']) in acceptable_types:
             if row['Name'] not in new_table['Name']:
                 new_table.add_row(row)
                 new_table.meta[row['Name']]=sndata[sn_type].meta[row['Name']]
@@ -1092,11 +1304,105 @@ def get_hst(row, table=None):
     data = check_dict(table.meta, [row['Name'],'hst','data'])
     if data:
         exptime = np.sum(data['exptime'].data)
+        if not is_number(exptime):
+            return('0.00')
         exptime = '%10.2f'%exptime
         exptime = exptime.strip()
         return(exptime)
 
-    return(0)
+    return('0.00')
+
+def get_hst_pre(row, table=None):
+    data = check_dict(table.meta, [row['Name'],'hst','data'])
+    if data:
+        if 'start_time' in data.keys():
+            try:
+                disc_time = Time(row['Discovery Date'])
+                mask = Time(data['start_time'], format='mjd')<disc_time
+                data = data[mask]
+
+                exptime = np.sum(data['exptime'].data)
+                if not is_number(exptime):
+                    return('0.00')
+                exptime = '%10.2f'%exptime
+                exptime = exptime.strip()
+                return(exptime)
+            except:
+                pass
+
+    return('0.00')
+
+def get_hst_post(row, table=None):
+    data = check_dict(table.meta, [row['Name'],'hst','data'])
+    if data:
+        if 'start_time' in data.keys():
+            try:
+                disc_time = Time(row['Discovery Date'])
+                mask = Time(data['start_time'], format='mjd')>disc_time
+                data = data[mask]
+
+                exptime = np.sum(data['exptime'].data)
+                if not is_number(exptime):
+                    return('0.00')
+                exptime = '%10.2f'%exptime
+                exptime = exptime.strip()
+                return(exptime)
+            except:
+                pass
+
+    return('0.00')
+
+def get_jwst(row, table=None):
+    data = check_dict(table.meta, [row['Name'],'jwst','data'])
+    if data:
+        exptime = np.sum(data['exptime'].data)
+        if not is_number(exptime):
+            return('0.00')
+        exptime = '%10.2f'%exptime
+        exptime = exptime.strip()
+        return(exptime)
+
+    return('0.00')
+
+def get_jwst_pre(row, table=None):
+    data = check_dict(table.meta, [row['Name'],'jwst','data'])
+    if data:
+        if 'start_time' in data.keys():
+            try:
+                disc_time = Time(row['Discovery Date'])
+                mask = Time(data['start_time'], format='mjd')<disc_time
+                data = data[mask]
+
+                exptime = np.sum(data['exptime'].data)
+                if not is_number(exptime):
+                    return('0.00')
+                exptime = '%10.2f'%exptime
+                exptime = exptime.strip()
+                return(exptime)
+            except:
+                pass
+
+    return('0.00')
+
+def get_jwst_post(row, table=None):
+    data = check_dict(table.meta, [row['Name'],'jwst','data'])
+    if data:
+        if 'start_time' in data.keys():
+            try:
+                disc_time = Time(row['Discovery Date'])
+                mask = Time(data['start_time'], format='mjd')>disc_time
+                data = data[mask]
+
+                exptime = np.sum(data['exptime'].data)
+                if not is_number(exptime):
+                    return('0.00')
+                exptime = '%10.2f'%exptime
+                exptime = exptime.strip()
+                return(exptime)
+            except:
+                pass
+
+    return('0.00')
 
 get_data = {'OSC': get_osc,
             'TNS': get_tns,
@@ -1105,7 +1411,10 @@ get_data = {'OSC': get_osc,
             'Discovery Date': get_disc_date,
             'Distance': get_distance,
             'Redshift': get_redshift,
-            'HST': get_hst,
+            'HST (pre-explosion)': get_hst_pre,
+            'HST (post-explosion)': get_hst_post,
+            'JWST (pre-explosion)': get_jwst_pre,
+            'JWST (post-explosion)': get_jwst_post,
             'NED': get_host_url,
             'Distance Method': get_distance_method,
             'Ref. (Distance)': get_distance_ref,
@@ -1113,9 +1422,12 @@ get_data = {'OSC': get_osc,
             'Ref. (Classification)': get_type_ref,
             'Classification': get_classification,}
 
-def get_productlist(coord, search_radius):
+def get_productlist(coord, search_radius, obstype='HST',
+    insts=['ACS','WFC','WFPC2'], table=None):
 
-    productlist = None
+    productlist = Table([['X'*100],[0.],[0.],[0.],['X'*20],
+        ['X'*20]],names=('instrument_name','ra','dec','exptime','filter',
+            'start_time')).copy()[:0]
 
     # Check for coordinate and exit if it does not exist
     if not coord:
@@ -1127,7 +1439,9 @@ def get_productlist(coord, search_radius):
     except (astroquery.exceptions.RemoteServiceError,
         requests.exceptions.ConnectionError,
         astroquery.exceptions.TimeoutError,
-        requests.exceptions.ChunkedEncodingError):
+        requests.exceptions.ChunkedEncodingError,
+        TimeoutError,
+        requests.exceptions.HTTPError):
         error = 'ERROR: MAST is not working currently working\n'
         error += 'Try again later...'
         print(error)
@@ -1138,11 +1452,11 @@ def get_productlist(coord, search_radius):
 
     # Construct masks for telescope, data type, detector, and data rights
     masks = []
-    masks.append([t.upper()=='HST' for t in obsTable['obs_collection']])
+    masks.append([t.upper()==obstype for t in obsTable['obs_collection']])
     masks.append([p.upper()=='IMAGE' for p in obsTable['dataproduct_type']])
     masks.append([any(l) for l in list(map(list,zip(*[[det in inst.upper()
                 for inst in obsTable['instrument_name']]
-                for det in ['ACS','WFC','WFPC2']])))])
+                for det in insts])))])
 
     # Get rid of short exposures (defined as 15s or less)
     masks.append([t > 15. for t in obsTable['t_exptime']])
@@ -1154,11 +1468,24 @@ def get_productlist(coord, search_radius):
     # Iterate through each observation and download the correct product
     # depending on the filename and instrument/detector of the observation
     for obs in obsTable:
+        # First check if we've already queried for these data, can skip those
+        if (table is not None and obstype.lower() in table.meta.keys() and
+            table.meta[obstype.lower()] is not None):
+            obstype_table = table.meta[obstype.lower()]
+            # key by start time
+            mask = obstype_table['start_time']==obs['t_min']
+            if len(obstype_table[mask])>0:
+                if not productlist:
+                    productlist = obstype_table[mask]
+                else:
+                    productlist = vstack([productlist, obstype_table[mask]])
+                continue
         try:
             productList = Observations.get_product_list(obs)
             # Ignore the 'C' type products
-            mask = productList['type']=='S'
-            productList = productList[mask]
+            if obstype=='HST':
+                mask = productList['type']=='S'
+                productList = productList[mask]
         except:
             error = 'ERROR: MAST is not working currently working\n'
             error += 'Try again later...'
@@ -1186,39 +1513,74 @@ def get_productlist(coord, search_radius):
         productList.add_column(filtcol)
         productList.add_column(startcol)
 
+        downloadFilenames = []
+        for p in productList:
+            filename = p['productFilename']
+
+            # Cut down new HST filenames that start with hst_PROGID
+            filename = '_'.join(filename.split('_')[-2:])
+            downloadFilenames.append(filename)
+
+        dlfilenamecol = Column(downloadFilenames, name='downloadFilename')
+        productList.add_column(dlfilenamecol)
+
         for prod in productList:
             filename = prod['productFilename']
 
-            if (('c0m.fits' in filename and 'WFPC2' in instrument) or
-                ('c1m.fits' in filename and 'WFPC2' in instrument) or
-                ('c0m.fits' in filename and 'PC/WFC' in instrument) or
-                ('c1m.fits' in filename and 'PC/WFC' in instrument) or
-                ('flc.fits' in filename and 'ACS/WFC' in instrument) or
-                ('flt.fits' in filename and 'ACS/HRC' in instrument) or
-                ('flc.fits' in filename and 'WFC3/UVIS' in instrument) or
-                ('flt.fits' in filename and 'WFC3/IR' in instrument)):
+            if obstype=='HST':
+                if (('c0m.fits' in filename and 'WFPC2' in instrument) or
+                    ('c1m.fits' in filename and 'WFPC2' in instrument) or
+                    ('c0m.fits' in filename and 'PC/WFC' in instrument) or
+                    ('c1m.fits' in filename and 'PC/WFC' in instrument) or
+                    ('flc.fits' in filename and 'ACS/WFC' in instrument) or
+                    ('flt.fits' in filename and 'ACS/HRC' in instrument) or
+                    ('flc.fits' in filename and 'WFC3/UVIS' in instrument) or
+                    ('flt.fits' in filename and 'WFC3/IR' in instrument)):
+
+                    if not productlist or len(productlist)==0:
+                        productlist = Table(prod)
+                    else:
+                        try:
+                            productlist.add_row(prod)
+                        except ValueError:
+                            print(prod)
+                            print(productlist)
+                            print(productlist.keys())
+                            raise Exception('Mismatch between row and table!')
+
+            elif obstype=='JWST':
+                if prod['productType']!='SCIENCE': continue
+                if 'i2d.fits' not in prod['productFilename']: continue
+                if prod['calib_level']!=3: continue
+                if prod['type']!='D': continue
 
                 if not productlist:
                     productlist = Table(prod)
                 else:
-                    productlist.add_row(prod)
+                    try:
+                        productlist.add_row(prod)
+                    except ValueError:
+                        print(prod)
+                        print(productlist)
+                        print(productlist.keys())
+                        raise Exception('Mismatch between row and table!')
 
     if not productlist:
         return(productlist)
 
-    downloadFilenames = []
-    for prod in productlist:
-        filename = prod['productFilename']
-
-        # Cut down new HST filenames that start with hst_PROGID
-        filename = '_'.join(filename.split('_')[-2:])
-        downloadFilenames.append(filename)
-
-    productlist.add_column(Column(downloadFilenames, name='downloadFilename'))
-
-    # Check that all files to download are unique
+    # Check that all files to have unique downloadFilename
     if productlist and len(productlist)>1:
         productlist = unique(productlist, keys='downloadFilename')
+
+    # If the table was passed, add these to metadata
+    if table.meta[obstype.lower()] is None:
+        table.meta[obstype.lower()]=productlist
+    else:
+        # Take vstack and make sure all entries are unique
+        table.meta[obstype.lower()]=vstack([table.meta[obstype.lower()],
+            productlist])
+        table.meta[obstype.lower()] = unique(table.meta[obstype.lower()],
+            keys='downloadFilename')
 
     # Sort by obsID in case we need to reference
     productlist.sort('obsID')
