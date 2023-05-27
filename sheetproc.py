@@ -62,28 +62,40 @@ def download_progenitor_data(spreadsheetId):
             data = sheet.values().get(spreadsheetId=spreadsheetId,
                 range=name).execute()
 
-            header = data['values'][0]
-            bodydata = data['values'][1:]
-            bodydata = [b for b in bodydata if len(b[0].strip())>0]
-            tabdata = transpose(bodydata)
-            if len(tabdata)==0:
-                tabdata = [['']]*len(header)
-            elif len(tabdata)<len(header):
-                for i in np.arange(len(header)-len(tabdata)):
-                    newcol = [' '*100]*len(tabdata[0])
-                    tabdata.append(newcol)
+            if 'values' in data.keys():
+                header = data['values'][0]
+                bodydata = data['values'][1:]
+                bodydata = [b for b in bodydata if len(b[0].strip())>0]
+                tabdata = transpose(bodydata)
+                if len(tabdata)==0:
+                    tabdata = [['']]*len(header)
+                elif len(tabdata)<len(header):
+                    for i in np.arange(len(header)-len(tabdata)):
+                        newcol = [' '*100]*len(tabdata[0])
+                        tabdata.append(newcol)
 
-            table = Table(tabdata, names=header)
-            table.meta['name'] = name
+                table = Table(tabdata, names=header)
+                table.meta['name'] = name
 
-            remove_rows = []
-            for i,row in enumerate(copy.copy(table)):
-                if len(row['Name'].strip())==0:
-                    remove_rows.append(i)
+                remove_rows = []
+                for i,row in enumerate(copy.copy(table)):
+                    if len(row['Name'].strip())==0:
+                        remove_rows.append(i)
 
-            table.remove_rows(remove_rows)
+                table.remove_rows(remove_rows)
 
-            alldata[name] = table
+                alldata[name] = table
+
+            else:
+                init_data = []
+                header = []
+                for key in params['cols']:
+                    header.append(key)
+                    init_data.append(['X'*100])
+
+                newtable = Table(init_data, names=header)
+
+                alldata[name] = newtable
 
         return(alldata)
 

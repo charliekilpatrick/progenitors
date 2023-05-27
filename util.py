@@ -1027,8 +1027,12 @@ def post_alert(row):
     email_summary = 'New Supernova Progenitor Target<br>'
     email_summary += '{0}<br>'.format(row['Name'])
     email_summary += '{0}<br>'.format(row['Classification'])
+    email_summary += '{0}<br>'.format(row['Host'])
     email_summary += 'z={0}<br>'.format(row['Redshift'])
+    email_summary += '{0} Mpc<br>'.format(row['Distance'])
     email_summary += '{0}<br>'.format(row['Discovery Date'])
+    email_summary += '{0}<br>'.format(row['YSEPZ'])
+    email_summary += '{0}<br>'.format(row['TNS'])
 
     resp=sendEmail(from_addr, email, email_args['subject'],
         email_summary, gmail_login, gmail_password, smtpserver)
