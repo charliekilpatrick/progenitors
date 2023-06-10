@@ -1,0 +1,5 @@
+metadata/*
+sed/data/bpass/z*
+sed/data/mist/
+sed/data/backends/
+analysis/
