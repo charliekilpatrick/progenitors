@@ -10,6 +10,9 @@ import os, numpy as np
 from astropy.time import Time
 import subprocess
 from numpy.random import rand
+import copy
+
+from scipy import integrate
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -35,8 +38,8 @@ def truncate(n, decimals=0):
 class sed_plot(object):
     def __init__(self):
 
-        self.pad = 0.25
-        self.figsize = 10.0
+        self.pad = 0.5
+        self.figsize = 12.0
 
         self.fit = sed_fitter(verbose=False)
         self.options = None
@@ -130,12 +133,50 @@ class sed_plot(object):
         self.fit.backend = self.fit.load_backend(model, self.fit.phottable,
             notau=notau)
 
+    def convert_to_fluxspace(self, spectrum, ext):
+
+        # Spectra should be scaled to absolute magnitudes, so flux at 10 pc,
+        # so need to rescale by distance/10pc
+        distance = self.fit.distance[0]
+                
+        # Assume distance in Mpc, so D/10pc = distance * 1e5
+        distance = distance * 1e5
+                
+        # This is for host extinction
+        extinction1 = self.fit.extinction_law(spectrum.wave, ext[0], ext[1])
+                
+        # This is for MW extinction
+        Av = self.fit.mw_ebv * 3.1
+        extinction2 = self.fit.extinction_law(spectrum.wave, Av, 3.1)
+                
+        # Now calculate observed flux and re-generate spectrum
+        obsflux = spectrum.flux * extinction1.flux * extinction2.flux
+        obsflux = obsflux/(np.pi*distance**2)
+        sp = S.ArraySpectrum(spectrum.wave, obsflux)
+
+        return(sp)
 
     def plot_sed(self, models, fluxspace=True, extinction=False,
         notau=False, **kwargs):
 
         phot = self.fit.phottable
         dum, inst_filt, mag, magerr = self.fit.get_fit_parameters(phot)
+
+        inst_filt = list(inst_filt)
+        mag = list(mag)
+        magerr = list(magerr)
+
+        inst_filt.append('SPITZER_IRAC_CH3')
+        inst_filt.append('SPITZER_IRAC_CH4')
+        mag.append(20.68)
+        mag.append(20.45)
+        magerr.append(0.0)
+        magerr.append(0.0)
+
+        inst_filt = np.array(inst_filt)
+        mag = np.array(mag)
+        magerr=np.array(magerr)
+
         # Get flux for observations in Janskies
         flux = 3631 * 10**(-0.4 * np.array(mag)) * 1.0e-23
         fluxerr = flux * np.array(magerr)/1.086
@@ -155,7 +196,7 @@ class sed_plot(object):
 
             self.fit.backend = self.fit.load_backend(model, self.fit.phottable,
                 notau=notau)
-            #self.fit.backend = self.fit.load_backend(model, phot)
+
             params = self.fit.get_guess(model, guess_type='params')
             ext = self.fit.get_guess(model, guess_type='blobs')
 
@@ -163,7 +204,7 @@ class sed_plot(object):
             if model=='blackbody':
                 sp = self.fit.create_blackbody(*params)
                 plottemp = ''
-                title=str(int(np.round(params[1], decimals=-2)))+' K'
+                title=str(int(np.round(params[1], decimals=-1)))+' K blackbody'
                 sp.convert('flam')
             elif model=='pickles':
                 self.fit.models = self.fit.load_pickles(self.fit.phottable)
@@ -177,55 +218,91 @@ class sed_plot(object):
                     title = 'RSG'
                     params = [0.01,params[0],params[1],200.]
                 else:
-                    label = 'RSG + {0} K dust'
-                    dust_temp = int(truncate(params[3],-2))
+                    label = 'Reddened RSG +\n {0} K dust'
+                    dust_temp = int(truncate(params[3],-1))
                     title = label.format(dust_temp)
 
                 sp = self.fit.create_rsg(*params)
 
-
-            # Spectra should be scaled to absolute magnitudes, so flux at 10 pc,
-            # so need to rescale by distance/10pc
-            if fluxspace:
-                distance = self.fit.distance[0]
-                # Assume distance in Mpc, so D/10pc = distance * 1e5
-                distance = distance * 1e5
-                # This is for host extinction
-                extinction1 = self.fit.extinction_law(sp.wave, ext[0], ext[1])
-                # This is for MW extinction
-                Av = self.fit.mw_ebv * 3.1
-                extinction2 = self.fit.extinction_law(sp.wave, Av, 3.1)
-                # Now calculate observed flux and re-generate spectrum
-                obsflux = sp.flux*extinction1.flux*extinction2.flux
-                obsflux = obsflux/(distance**2)
-                sp = S.ArraySpectrum(sp.wave, 3.2*obsflux)
+            if fluxspace: sp = self.convert_to_fluxspace(sp, ext)
 
             # Get wavelengths for inst_filt and spectrum
             wave, width = self.fit.get_wavelength_widths(sp, bandpasses)
             # Convert flux (currently in erg/s/cm2/Hz) to flam
             # Only need to do this once
             if not fluxcorr:
-                flux = flux * 2.998e18/wave**2
+                fluxnu = copy.copy(flux)
+                flux = fluxnu * 2.998e18/wave**2
                 fluxerr = fluxerr * 2.998e18/wave**2
                 fluxcorr = True
 
             if i==0:
+                print('filter mag wave flux_nu flux_lam')
                 for j in np.arange(len(wave)):
                     if fluxerr[j]==0.0:
                         uplim = np.array([1])
                         fluxerr[j] = 0.3 * flux[j]
+                        use_color=lightred
                     else:
                         uplim = np.array([0])
+                        use_color=red
+
+                    if magerr[j]!=0.0:
+                        print(inst_filt[j],mag[j],wave[j],fluxnu[j],flux[j])
                     ax.errorbar([wave[j]], [flux[j]], yerr=[fluxerr[j]],
-                        xerr=[width[j]], marker='o', color=red, ls='none',
+                        xerr=[width[j]], marker='o', color=use_color, ls='none',
                         capsize=0.5*self.figsize, linewidth=0.6*self.figsize,
                         zorder=5, ms=2*self.figsize, markeredgecolor=black,
                         markeredgewidth=0.4*self.figsize, uplims=uplim)
 
+            if model=='blackbody':
+                print(sp.wave)
+                print(sp.flux)
+
+                bbwave = sp.wave 
+                bbsflux = sp.flux 
+
+                idx = np.argsort(bbwave)
+                bbwave = np.flip(bbwave[idx])
+                bbsflux = np.flip(bbsflux[idx])
+
+                bbflux = integrate.simps(bbwave, bbsflux)
+                print(bbflux)
+
+                distcm = self.fit.distance[0]*3.086e+24
+                lum = 4*np.pi*(distcm)**2*bbflux
+                print('temperature [K]:',str(int(np.round(params[1], decimals=-1))))
+                print('peak flux [erg/s/cm2/angstrom]:',np.max(sp.flux))
+                print('integrated flux [erg/s/cm2]:',bbflux)
+                print('distance [cm]:',distcm)
+                print('luminosity [erg/s]:',lum)
+                print('luminosity [log(Lsol)]:',np.log10(lum/3.839e33))
+
             ax.plot(sp.wave, sp.flux, label=title, zorder=0,
                 color=pallette[i+2], linewidth=0.6*self.figsize)
 
-        ylim = [0.5*np.min(flux-fluxerr), 1.4*np.max(flux+fluxerr)]
+            if model=='rsg':
+                if len(params)==2:
+                    params = [0.01,params[0],params[1],200.]
+                else:
+                    dust_temp = int(truncate(params[3],-2))
+
+                sp1 = self.fit.create_rsg(*params, sptype='star')
+                sp2 = self.fit.create_rsg(*params, sptype='dust')
+
+                if fluxspace: sp1 = self.convert_to_fluxspace(sp1, ext)
+                if fluxspace: sp2 = self.convert_to_fluxspace(sp2, ext)
+
+                ax.plot(sp1.wave, sp1.flux, label='Reddened RSG', zorder=1,
+                    color='blue', linewidth=0.6*self.figsize)
+
+                dust_label = '{0} K dust'
+                dust_temp = int(truncate(params[3],-1))
+                dust_label = dust_label.format(dust_temp)
+                ax.plot(sp2.wave, sp2.flux, label=dust_label, zorder=1,
+                    color='red', linewidth=0.6*self.figsize)
+
+        ylim = [0.5*np.min(flux-fluxerr), 1.5*np.max(flux+fluxerr)]
         xlim = [0.7*np.min(wave-width), 1.2*np.max(wave+width)]
         ax.set_yscale('log')
         ax.set_ylim(ylim)
@@ -265,10 +342,14 @@ class sed_plot(object):
         ax.set_yticks(ytickval, minor=True)
         ax.set_yticklabels(yticklabel, minor=True)
 
-        if xlim[1] > 5.0e4:
+        if xlim[1] > 3.0e4:
             if xlim[1]>1.0e5: xlim[1]=1.0e5
             ax.set_xlim(xlim)
             ax.set_xscale('log')
+
+            ax.set_xlabel('Observer-frame Wavelength ('+r'$\mu$m'+')')
+            ax.set_xticks([3000,10000,30000])
+            ax.set_xticklabels(['0.3','1.0','3.0'])
 
         legend = ax.legend(loc='best', fontsize=4.0*self.figsize)
 
@@ -374,10 +455,13 @@ class sed_plot(object):
         self.setup_axis_titles(ax, 'log_T', 'log_L')
 
         # Get range of model track data
-        if mode=='single':
+        if 'single' in mode:
             tracks = self.load_tracks('mist', [8,10,17,23,30,40,60],
                 clip_early=3.0e4, clip_tail=4.67)
-        elif mode=='binary':
+        elif 'rsg' in mode:
+            tracks = self.load_tracks('mist', [8,10,12,15,18,25],
+                clip_early=3.0e4, clip_tail=4.67)
+        elif 'binary' in mode:
             tracks = self.load_tracks('bpass', [[19,0.1,0.6]])
 
         ylim = [0.92*np.min(tracks['log_L'].data),
@@ -409,7 +493,7 @@ class sed_plot(object):
             label_logL = mass_track['log_L'].data[idx]
 
             ax.plot(mass_track['log_Teff'].data, mass_track['log_L'].data,
-                color=color, linewidth=0.4*self.figsize,zorder=1)
+                color=color, linewidth=0.4*self.figsize,zorder=2)
 
             if mode=='binary':
                 terminal = mass_track[-1]
@@ -418,6 +502,7 @@ class sed_plot(object):
 
                 ax.plot(term_pos[0],term_pos[1],marker='*',
                     color=color,ms=6*self.figsize)
+
                 ax.text(term_pos[0]-0.0035*self.figsize*(xlim[1]-xlim[0]),
                     term_pos[1]+0.0040*self.figsize*(ylim[1]-ylim[0]), 'SN',
                     horizontalalignment='center', verticalalignment='center',
@@ -430,14 +515,6 @@ class sed_plot(object):
                 h_free = h_poor[h_free_idx]
 
                 h_free_pos = [h_free['log_Teff'],h_free['log_L']]
-
-                #ax.plot(h_free_pos[0],h_free_pos[1],marker='o',
-                #    color=color,ms=4*self.figsize)
-                #ax.text(h_free_pos[0]+0.0070*self.figsize*(xlim[1]-xlim[0]),
-                #    h_free_pos[1]+0.0100*self.figsize*(ylim[1]-ylim[0]),
-                #    r'$M_{H}=0.05~M_{\odot}$',
-                #    horizontalalignment='center', verticalalignment='center',
-                #    color=color)
 
                 rlof_on_idx = np.argmin(mass_track['rlof_rate'].data)
 
@@ -455,13 +532,19 @@ class sed_plot(object):
                     horizontalalignment='center', verticalalignment='center',
                     color=color)
 
-            if mode=='single':
+            if 'single' in mode:
                 idx = np.argmax(mass_track['log_Teff'].data)
                 label_teff = mass_track['log_Teff'].data[idx]
                 label_logL = mass_track['log_L'].data[idx]
                 textpos = [label_teff+0.0065*self.figsize*(xlim[0]-xlim[1]),
                     label_logL-0.004*self.figsize*(ylim[1]-ylim[0])]
-            elif mode=='binary':
+            elif 'rsg' in mode:
+                idx = -1
+                label_teff = mass_track['log_Teff'].data[idx]
+                label_logL = mass_track['log_L'].data[idx]
+                textpos = [label_teff-0.0030*self.figsize*(xlim[0]-xlim[1]),
+                    label_logL+0.0011*self.figsize*(ylim[1]-ylim[0])]
+            elif 'binary' in mode:
                 idx = 0
                 label_teff = mass_track['log_Teff'].data[idx]
                 label_logL = mass_track['log_L'].data[idx]
@@ -477,8 +560,9 @@ class sed_plot(object):
                 ax.set_xlim(xlim)
 
             ax.text(textpos[0], textpos[1], str(mass)+r'$~M_{\odot}$',
-                color=color, zorder=1,
-                horizontalalignment='center', verticalalignment='center')
+                color=color, zorder=5,
+                horizontalalignment='center', verticalalignment='center',
+                bbox=dict(facecolor='white', edgecolor=black))
 
         if add_progenitors:
             progdata = self.load_progenitors(self.fit.dirs['data']+progenitors)
@@ -497,18 +581,62 @@ class sed_plot(object):
             for ptype in plot_types:
                 for row in progdata:
                     if row['type'] in ptype['type']:
-                        if row['e_log_L']==0.0: uplims=[1]
-                        else: uplims=[0]
+                        if row['e_log_L']==0.0: 
+                            uplims=[1]
+                            lum_err = 0.1
+                            # Note - skipping limits
+                            continue
+                        else: 
+                            uplims=[0]
+                            lum_err=row['e_log_L']
 
                         ax.errorbar([row['log_T']],[row['log_L']],
-                            xerr=[row['e_log_T']],yerr=[row['e_log_L']],
+                            xerr=[row['e_log_T']],yerr=[lum_err],
                             uplims=uplims, color=ptype['color'],
                             linewidth=0.4*self.figsize,marker=ptype['marker'],
-                            ms=2*self.figsize,zorder=5,capsize=0.5*self.figsize,
+                            ms=2*self.figsize,zorder=1,capsize=0.5*self.figsize,
                             markeredgecolor=black,
                             markeredgewidth=0.4*self.figsize)
 
-            legend = ax.legend(loc='lower left',fontsize=3.2*self.figsize)
+            if 'rsg' in mode:
+                legend = ax.legend(loc='lower right',fontsize=4.8*self.figsize)
+            else:
+                legend = ax.legend(loc='lower left',fontsize=4.8*self.figsize)
+
+        if 'rsg' in mode:
+            self.fit.model_type = 'rsg'
+            self.load_sed(self.fit.model_type, self.fit.filename)
+            reader = self.fit.load_backend(self.fit.model_type, self.fit.phottable)
+            sample = np.array(reader.get_chain(flat=True))
+            prob = np.array(reader.get_log_prob(flat=True))
+            blob = np.array(reader.get_blobs(flat=True))
+
+            params = self.fit.model_fit_params
+            ndim = len(params)
+
+            logL=self.fit.calculate_param_best_fit(sample[:,1], prob, ndim, 
+                params[1], show=False)
+            Teff=self.fit.calculate_param_best_fit(sample[:,2], prob, ndim, 
+                params[2], show=False)
+
+            logL_unc = self.fit.calculate_param_best_fit(sample[:,1], prob, 
+                ndim, params[1], return_uncertainty=True, show=False)
+            Teff_unc = self.fit.calculate_param_best_fit(sample[:,2], prob, 
+                ndim, params[1], return_uncertainty=True, show=False)
+
+            logL_unc_dist = 2.17 * self.fit.distance[1]/self.fit.distance[0]
+
+            xerr = np.array([[np.log10(Teff+Teff_unc[0])-np.log10(Teff),
+                    np.log10(Teff)-np.log10(Teff-Teff_unc[0])]])
+            yerr = np.array([[logL_unc[0] + logL_unc_dist, 
+                             logL_unc[1] + logL_unc_dist]])
+
+            ax.errorbar([np.log10(Teff)],[logL],
+                xerr=xerr.transpose(),yerr=yerr.transpose(),color=red,
+                linewidth=0.4*self.figsize,marker='*',
+                markeredgecolor=goldenrod,
+                ms=12*self.figsize,zorder=5,capsize=0.5*self.figsize,
+                markeredgewidth=0.4*self.figsize)
 
         if add_yoon:
             yoondata = self.load_yoon('data/yoon_0.02.dat')
@@ -530,7 +658,10 @@ class sed_plot(object):
                 ax.plot(row['log_Teff'],row['log_L'],'*',
                     ms=4*self.figsize, label=label, color=color)
 
-            legend = ax.legend(loc='upper left',fontsize=3.2*self.figsize)
+            if 'rsg' in mode:
+                legend = ax.legend(loc='upper left',fontsize=3.2*self.figsize)
+            else:
+                legend = ax.legend(loc='upper left',fontsize=3.2*self.figsize)
             ylim[0]=4.45
 
         if add_lbvs:
@@ -606,14 +737,13 @@ class sed_plot(object):
                 if data[1]-data[3]<ylim[0]:
                     ylim[0] = 0.95*(data[1]-data[3])
 
+                if 'rsg' in mode:
+                    xlim[0] = 3.89 ; xlim[1] = 3.4
+                    ylim[0] = 3.5 ; ylim[1] = 5.6
+
+
                 ax.set_ylim(ylim)
                 ax.set_xlim(xlim)
-
-                ax.errorbar([data[0]],[data[1]],xerr=[data[2]],yerr=[data[3]],
-                    marker='*', ms=4*self.figsize,color=blue,
-                    markeredgecolor=goldenrod,zorder=10,
-                    capsize=0.5*self.figsize,markeredgewidth=0.3*self.figsize,
-                    linewidth=0.4*self.figsize)
 
                 xposscale=0.002
                 if mode=='single': xposscale=0.002
@@ -621,12 +751,14 @@ class sed_plot(object):
 
                 textpos = [data[0]+xposscale*self.figsize*(xlim[0]-xlim[1]),
                            data[1]+0.0082*self.figsize*(ylim[1]-ylim[0])]
-                #ax.text(textpos[0],textpos[1],'2019yvr',
-                #    color=blue, zorder=10, fontsize=4.0*self.figsize, weight=0,
-                #    horizontalalignment='center',verticalalignment='center')
 
 
-        self.close_plot('hr-'+mode+'.eps')
+
+        outfile = self.options.objname.strip() + '_hr-{0}.eps'
+        outfile = outfile.format(mode[0])
+        outfile = os.path.join(self.outdir, outfile)
+
+        self.close_plot(outfile)
 
     def cmd(self, bands, mode='single', progenitors='progenitors.dat',
         add_progenitors=True,add_yoon=False,add_lbvs=False,add_data=True,
@@ -698,14 +830,6 @@ class sed_plot(object):
                 h_free = h_poor[h_free_idx]
 
                 h_free_pos = [h_free['log_Teff'],h_free['log_L']]
-
-                #ax.plot(h_free_pos[0],h_free_pos[1],marker='o',
-                #    color=color,ms=4*self.figsize)
-                #ax.text(h_free_pos[0]+0.0070*self.figsize*(xlim[1]-xlim[0]),
-                #    h_free_pos[1]+0.0100*self.figsize*(ylim[1]-ylim[0]),
-                #    r'$M_{H}=0.05~M_{\odot}$',
-                #    horizontalalignment='center', verticalalignment='center',
-                #    color=color)
 
                 rlof_on_idx = np.argmin(mass_track['rlof_rate'].data)
 
@@ -905,10 +1029,11 @@ class sed_plot(object):
     def close_plot(self, name):
 
         if not name.endswith('.eps'): name = name+'.eps'
+        name = name.replace('.eps','.png')
         print('Saving figure:',name)
 
-        plt.tight_layout(pad=self.pad, w_pad=self.pad, h_pad=self.pad)
-        plt.savefig(name, format='eps')
+        plt.tight_layout(pad=self.pad)
+        plt.savefig(name, format='png')
         plt.clf()
         plt.close('all')
 
@@ -976,6 +1101,7 @@ class sed_plot(object):
     def plot_corner(self, models, plot_blobs=False, notau=False, **kwargs):
         phot = self.fit.phottable
         dum, inst_filt, mag, magerr = self.fit.get_fit_parameters(phot)
+
         # Get flux for observations in Janskies
         flux = 3631 * 10**(-0.4 * np.array(mag)) * 1.0e-23
         fluxerr = flux * np.array(magerr)/1.086

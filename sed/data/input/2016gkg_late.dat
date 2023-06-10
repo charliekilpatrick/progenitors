@@ -1,0 +1,26 @@
+# %ECSV 0.9
+# ---
+# datatype:
+# - {name: MJD, datatype: string}
+# - {name: Instrument, datatype: string}
+# - {name: Filter, datatype: string}
+# - {name: Exposure, datatype: float64}
+# - {name: Magnitude, datatype: float64}
+# - {name: Uncertainty, datatype: float64}
+# - {name: Use, datatype: int}
+# meta: !!omap
+# - {name: 2016gkg}
+# - {ra: 23.560173 }
+# - {dec: -29.440126 }
+# - {distance: 26.4}
+# - {dist_error: 5.3}
+# - {host_ebv: 0.09}
+# - {host_rv: 3.1}
+# - {magsystem: ab}
+# - {host_galaxy: NGC 613}
+# - {discovery_date: 2016-09-20T05:57:45.000}
+# schema: astropy-2.0
+MJD         Instrument Filter   Exposure       Magnitude Uncertainty Use
+59445.82    WFC3/UVIS  F606W    2400.000       25.10     0.07        1
+59445.83    WFC3/UVIS  F438W    2400.000       26.61     0.27        1
+

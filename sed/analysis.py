@@ -10,7 +10,7 @@ import warnings
 warnings.filterwarnings('ignore')
 
 from astropy import units as u
-from astropy.io import ascii
+from astropy.io import ascii, fits
 from astropy.coordinates import SkyCoord
 from astropy.table import vstack, Column, Table
 
@@ -82,12 +82,18 @@ class sed_fitter(object):
             'data': 'data/'
         }
 
+        try:
+            self.pandeia = os.environ['PANDEIA']
+        except:
+            print('WARNING: if using JWST filters, set PANDEIA env variable')
+            self.pandeia = None
+
         for key in self.dirs.keys():
             if not os.path.exists(self.dirs[key]):
                 os.makedirs(self.dirs[key])
 
         # Report output values to this many significant figures
-        self.significant_figures = 4
+        self.significant_figures = 3
 
         # For parameters that are prohibitive to calculate with every sample,
         # take this many random samples first and then calculate
@@ -123,7 +129,10 @@ class sed_fitter(object):
         self.model_fit_params = []
         self.model_fit_blobs = []
 
-        self.mist_masses = np.arange(7.5, 40.0, 0.5)
+        self.mist_masses = list(np.arange(7.5, 40.0, 0.5))
+        add_masses = list(np.arange(8.0,15.0,0.1))
+        add_masses = [int(m*10.0)*1.0/10.0 for m in add_masses]
+        self.mist_masses = np.array(np.unique(self.mist_masses+add_masses))
         self.metallicity = 0.014 # Metallicity in terms of Z
 
         # Distance and uncertainty in Mpc
@@ -150,7 +159,6 @@ class sed_fitter(object):
         self.rv = []
 
         # Default wavelength binset in angstroms for pysynphot
-        #self.waves = 10.0 + 10.0*np.arange(24000)
         self.waves = 3500.0 + 10.0*np.arange(9650)
         self.bandpasses = None
 
@@ -158,8 +166,8 @@ class sed_fitter(object):
                             'cmd': 'M.track.eep.cmd'}
 
         self.bounds = {
-            'luminosity': [2.0, 7.0],
-            'temperature': [2000., 100000.],
+            'luminosity': [-1.0, 7.0],
+            'temperature': [800., 100000.],
             'tau_V': [0.01, 6.0],
             'dust_temp': [200., 2000.],
             'mass': [0.1, 120.0],
@@ -225,6 +233,10 @@ class sed_fitter(object):
         parser.add_argument('--skipdust', default=False, action='store_true',
             help='For the RSG model, set this flag to skip sampling the '+\
             'dust parameters as part of showing the output.')
+        parser.add_argument('--report-mist-mass', default=False, action='store_true',
+            help='For a model with a predicted luminosity, report the MIST mass'+\
+            'that is consistent with the range of luminosity.')
+
 
 
         return(parser)
@@ -241,8 +253,8 @@ class sed_fitter(object):
 
         # Restrict the temperture range if model type is RSG
         if model_type=='rsg':
-            self.bounds['luminosity']=[3.0,5.6]
-            self.bounds['temperature']=[2600.0, 8000.0]
+            self.bounds['luminosity']=[2.5,5.8]
+            self.bounds['temperature']=[2600.0, 4500.0]
 
         if model_type=='pickles':
             self.bounds['luminosity']=[3.0,6.0]
@@ -299,7 +311,10 @@ class sed_fitter(object):
             bandpasses = [self.inst_filt_to_bandpass(i) for i in inst_filt]
 
             for i,bp in zip(inst_filt,bandpasses):
-                self.host_ext_inst_filt[i]=self.calculate_extinction(val[0],
+                if val[0]==0.0 or val[1]==0.0:
+                    self.host_ext_inst_filt[i]=0.
+                else:
+                    self.host_ext_inst_filt[i]=self.calculate_extinction(val[0],
                     val[1], bp)
 
         elif (self.phottable and 'host_ebv' in self.phottable.meta.keys() and
@@ -317,8 +332,11 @@ class sed_fitter(object):
             bandpasses = [self.inst_filt_to_bandpass(i) for i in inst_filt]
 
             for i,bp in zip(inst_filt,bandpasses):
-                self.host_ext_inst_filt[i]=self.calculate_extinction(val[0],
-                    val[1], bp)
+                if val[0]==0.0 or val[1]==0.0:
+                    self.host_ext_inst_filt[i]=0.
+                else:
+                    self.host_ext_inst_filt[i]=self.calculate_extinction(val[0],
+                        val[1], bp)
 
         # Default just set host extinction to zero
         else:
@@ -396,9 +414,10 @@ class sed_fitter(object):
     def import_phottable(self, filename):
         # Import phototmetry table - we require ascii.ecsv format
         try:
+            print(f'Reading input table {filename}')
             table = Table.read(filename, format='ascii.ecsv')
         except astropy.io.ascii.core.InconsistentTableError:
-            error = 'ERROR: input file needs to be ascii.ecsv format, e.g.,'
+            error = 'ERROR: input file needs to be ascii.ecsv format'
             print(error)
             sys.exit()
 
@@ -423,6 +442,7 @@ class sed_fitter(object):
 
         if 'distance' in table.meta.keys():
             self.distance[0] = float(table.meta['distance'])
+            self.dm = 5 * np.log10(self.distance[0]) + 25.0
         if 'dist_error' in table.meta.keys():
             self.distance[1] = float(table.meta['dist_error'])
 
@@ -469,9 +489,22 @@ class sed_fitter(object):
             newdict[key.upper()]=constants.sf11rv[key]
         constants.sf11rv.update(newdict)
 
-        for row in self.phottable:
+        remove_rows=[]
+        for i,row in enumerate(self.phottable):
             inst_filt = self.get_inst_filt(row)
-            self.rv.append(constants.sf11rv[inst_filt])
+            filt = inst_filt.split('_')[-1]
+            if filt in constants.sf11rv.keys():
+                self.rv.append(constants.sf11rv[filt])
+            elif inst_filt in constants.sf11rv.keys():
+                self.rv.append(constants.sf11rv[inst_filt])
+            else:
+                print(f'WARNING: {inst_filt} and {filt} not in '+\
+                    'extinction coefficient constants!  Update contants.py!')
+                print(f'Removing: {inst_filt}')
+                remove_rows.append(i)
+
+        self.phottable.remove_rows(remove_rows)
+
 
         return(self.phottable)
 
@@ -510,6 +543,8 @@ class sed_fitter(object):
             # Exit if we have all models
             if not inst_filt:
                 return(models)
+        else:
+            models = {}
 
         # Create models for the ones that don't already exist
         mags = {}
@@ -527,7 +562,6 @@ class sed_fitter(object):
 
         bar.finish()
 
-        models = {}
         for val in inst_filt:
             models[val] = interpolate.interp2d(Lval, logTval, mags[val],
                 kind='cubic', bounds_error=True)
@@ -661,10 +695,23 @@ class sed_fitter(object):
             nLval = 26 ; nTdval = 12 ; ntau_Vval = 12 ; nTval = 20
             Lval = np.linspace(self.bounds['luminosity'][0],
                 self.bounds['luminosity'][1], nLval)
-            Tdval = 10**np.linspace(1, 3.35, nTdval)
-            tau_Vval = 10**np.linspace(-2.0, 0.8, ntau_Vval)
+            Tdval = 10**np.linspace(np.log10(self.bounds['dust_temp'][0]), 
+                np.log10(self.bounds['dust_temp'][1]), nTdval)
+            tau_Vval = 10**np.linspace(np.log10(self.bounds['tau_V'][0]), 
+                np.log10(self.bounds['tau_V'][1]), ntau_Vval)
             Tval = np.linspace(self.bounds['temperature'][0],
                 self.bounds['temperature'][1], nTval)
+
+            if self.verbose:
+                print('Bounds:')
+                Lbounds = ['%.4f'%np.min(Lval),'%.4f'%np.max(Lval)]
+                Tbounds = ['%.4f'%np.min(Tval),'%.4f'%np.max(Tval)]
+                dbounds = ['%.4f'%np.min(Tdval),'%.4f'%np.max(Tdval)]
+                tbounds = ['%.4f'%np.min(tau_Vval),'%.4f'%np.max(tau_Vval)]
+                print(f'log_L={Lbounds[0]}->{Lbounds[1]}')
+                print(f'T_eff={Tbounds[0]}->{Tbounds[1]}')
+                print(f'Tdust={dbounds[0]}->{dbounds[1]}')
+                print(f'tau_V={tbounds[0]}->{tbounds[1]}')
 
             inst_filt = [self.get_inst_filt(row) for row in phottable]
             # Get unique inst_filt values
@@ -719,6 +766,37 @@ class sed_fitter(object):
 
             return(models)
 
+    def get_jwst_filters(self, filtnam):
+
+        tel, inst, filt = filtnam.split(',')
+        filt = filt.lower()
+        inst = inst.lower()
+
+        globstr=os.path.join(self.pandeia, 'jwst', inst,
+            'filters', f'*{filt}_trans*')
+        filts = glob.glob(globstr)
+
+        if len(filts)!=1:
+            return(None)
+
+        f = filts[0]
+            
+        base = os.path.split(f)[1]
+        name = inst.lower()+'_'+base.split('_')[1]
+        hdu = fits.open(f)
+        wave = np.array([float(el[0])*1.0e4 for el in hdu[1].data])
+            
+        tran = np.array([float(el[1]) for el in hdu[1].data])
+            
+        # Only consider wavelengths < 30 microns
+        mask = wave < 30.0*1.0e4
+        wave = wave[mask]
+        tran = tran[mask]
+            
+        bp = S.ArrayBandpass(wave, tran, name=name, waveunits='angstrom')
+            
+        return(bp)
+
     def inst_filt_to_bandpass(self, inst_filt, bpdir='data/bandpass/'):
         inst = inst_filt.lower()
         filt = inst_filt.split('_')[-1].lower()
@@ -744,6 +822,13 @@ class sed_fitter(object):
             bp=S.ObsBandpass('acs,sbc,'+filt)
         elif 'wfpc2' in inst:
             bp=S.ObsBandpass('wfpc2,'+filt)
+        elif 'jwst' in inst:
+            if 'nircam' in inst:
+                bp=self.get_jwst_filters('jwst,nircam,'+filt)
+            elif 'miri' in inst:
+                bp=self.get_jwst_filters('jwst,miri,'+filt)
+            else:
+                raise Exception(f'ERROR: unrecognized JWST instrument: {inst}')
         else:
             # Load from bandpass directory
             if ('spitzer' in inst and 'irac' in inst):
@@ -764,13 +849,23 @@ class sed_fitter(object):
                 filename = 'ASASSN.'+filt.lower()+'.dat'
             elif ('decam' in inst):
                 filename = 'DECAM.'+filt.lower()+'.dat'
+            elif ('gemini' in inst and 'niri' in inst):
+                filename = 'GEMINI.NIRI.'+filt.upper()+'.dat'
+            elif ('mayall' in inst and 'newfirm' in inst):
+                filename = 'MAYALL.NEWFIRM.'+filt.upper()+'.dat'
+            else:
+                raise Exception(f'ERROR {inst} not recognized!')
 
             file = bpdir + filename
             if not os.path.exists(file):
-                print(f'WARNING: filter for {inst_filt} does not exist!')
-                return(None)
+                raise Exception(f'WARNING: filter for {inst_filt} does not exist!')
 
             wave, trans = np.loadtxt(file, unpack=True)
+
+            # Wavelength is given in microns instead of angstroms
+            if 'niri' in inst:
+                wave = wave * 1.0e4
+
             bp = S.ArrayBandpass(wave, trans, name=filt.lower(),
                 waveunits='Angstrom')
 
@@ -864,7 +959,7 @@ class sed_fitter(object):
     def get_interpolated_mag(self, inst_filt, *args):
         if self.model_type=='pickles' or self.model_type=='blackbody':
             lum, temp = args
-            mags = np.array([np.asscalar(self.models[i](lum, np.log10(temp)))
+            mags = np.array([self.models[i](lum, np.log10(temp)).item()
                 for i in inst_filt])
         elif self.model_type=='rsg':
             if len(args)==2:
@@ -874,8 +969,8 @@ class sed_fitter(object):
             else:
                 tau_V, L, Teff, Td = args
             scaled_L = 10**L
-            mags = np.array([np.asscalar(self.models[i]((tau_V, scaled_L,
-                Teff, Td))) for i in inst_filt])
+            mags = np.array([self.models[i]((tau_V, scaled_L,
+                Teff, Td)).item() for i in inst_filt])
         return(mags)
 
     def create_pickles(self, lum, temp):
@@ -924,31 +1019,35 @@ class sed_fitter(object):
 
         return(mags)
 
-    def load_mist(self, phottable, mist_type='full', feh=0.0, rotation=False):
+    def load_mist(self, phottable, mist_type='full', feh=0.0, rotation=False,
+        use_inst=None, return_models=False):
 
         # First parse photometry data into the format required by MIST table key
         photkeys = []
-        for row in phottable:
-            if inst=='WFC3/UVIS':
-                inst_str = 'WFC3' ; inst_key = 'WFC3_UVIS'
-            elif 'WFC3' in inst and 'IR' in inst:
-                inst_str = 'WFC3' ; inst_key = 'WFC3_IR'
-            elif 'ACS' in inst and 'WFC' in inst:
-                inst_str = 'ACS_WFC' ; inst_key = 'ACS_WFC'
-            elif 'ACS' in inst and 'HRC' in inst:
-                inst_str = 'ACS_HRC' ; inst_key = 'ACS_HRC'
-            elif 'WFPC2' in inst:
-                inst_str = 'WFPC2' ; inst_key = 'WFPC2'
-            else:
-                warning = 'WARNING: could not interpret instrument string {0}'
-                print(warning.format(inst))
-                continue
+        if phottable is not None:
+            for row in phottable:
+                if inst=='WFC3/UVIS':
+                    inst_str = 'WFC3' ; inst_key = 'WFC3_UVIS'
+                elif 'WFC3' in inst and 'IR' in inst:
+                    inst_str = 'WFC3' ; inst_key = 'WFC3_IR'
+                elif 'ACS' in inst and 'WFC' in inst:
+                    inst_str = 'ACS_WFC' ; inst_key = 'ACS_WFC'
+                elif 'ACS' in inst and 'HRC' in inst:
+                    inst_str = 'ACS_HRC' ; inst_key = 'ACS_HRC'
+                elif 'WFPC2' in inst:
+                    inst_str = 'WFPC2' ; inst_key = 'WFPC2'
+                else:
+                    warning = 'WARNING: could not interpret instrument string {0}'
+                    print(warning.format(inst))
+                    continue
 
-            photkey = inst_key + '_' + filt.upper()
-            photkeys.append((inst_str, photkey))
+                photkey = inst_key + '_' + filt.upper()
+                photkeys.append((inst_str, photkey))
+        else:
+            photkeys.append(None)
 
         # Get feh key
-        feh_str = str(int(kwargs['feh']*100)).zfill(4)
+        feh_str = str(int(feh*100)).zfill(4)
         opt = self.files['mist']
 
         all_models = None
@@ -960,18 +1059,33 @@ class sed_fitter(object):
 
             # So we only have to load each table once, iterate through the
             # unique instrument values
-            for inst in np.unique([key[0] for key in photkeys]):
+            for key in np.unique([photkeys]):
 
-                directory = opt['dir'] + 'FEH_{feh}/{inst}/'
+                if use_inst: 
+                    inst=use_inst
+                else:
+                    inst=key[0]
+
+                directory = os.path.join(self.dirs['mist'],'FEH_{feh}/{inst}/')
                 directory = directory.format(feh=feh_str, inst=inst)
-                fullfile = directory + mass_str + opt['suffix']['cmd']
+                if inst.lower()=='theoretical':
+                    fullfile = directory + mass_str + self.files['mist']['suffix']['theoretical']
+                else:
+                    fullfile = directory + mass_str + self.files['mist']['suffix']['cmd']
 
                 if not os.path.exists(fullfile):
                     warning = 'WARNING: data do not exist for:{0}'
-                    print(warning.format(directory))
+                    print(warning.format(fullfile))
                     continue
 
-                cmd_table = ascii.read(fullfile, header_start=14)
+                if inst.lower()=='theoretical':
+                    cmd_table = ascii.read(fullfile, header_start=11)
+                else:
+                    cmd_table = ascii.read(fullfile, header_start=14)
+
+                if mist_type=='terminal':
+                    cmd_table.sort('star_age')
+                    cmd_table = Table(cmd_table[-1])
 
                 if not model_table:
                     model_table = cmd_table['star_age','log_Teff','log_L']
@@ -982,11 +1096,11 @@ class sed_fitter(object):
 
                 # Load model data for each relevant photkey
                 for photkey in photkeys:
-                    if photkey[0]!=inst:
-                        continue
+                    if not photkey: continue
+                    if photkey[0]!=inst: continue
 
                     if (photkey in cmd_table.keys() and
-                       key not in model_table.keys()):
+                        key not in model_table.keys()):
 
                         model_table.add_column(cmd_table[key])
 
@@ -996,11 +1110,15 @@ class sed_fitter(object):
                 else:
                     all_models = vstack([all_models, model_table])
 
+        if return_models:
+            return(all_models)
+
+
         # Now that we've assembled the models, interpolate with grid to obtain a
         # more precise estimate at a range of model parameters
         if mist_type=='terminal':
             ages = np.log10(self.models['star_age'].data)
-            mass = self.models['mass'].data
+            mass = self.model ['mass'].data
 
             self.ages_shape = (np.min(ages), np.max(ages), self.model_size)
             self.mass_shape = (np.min(mass), np.max(mass), self.model_size)
@@ -1090,42 +1208,24 @@ class sed_fitter(object):
         bpassfile = self.dirs['bpass']+'bpass_{0}_{1}.dat'.format(feh_str,
             bpass_type)
 
-        table = None
+        table = Table([[0.],[0.],[0.]],names=('mass','ratio','period')
+            ).copy()[:0]
         if os.path.exists(bpassfile):
             table = Table.read(bpassfile, format='ascii')
 
-        photkeys = [] ; remove_filts = []
-        for row in phottable:
-            filt = row['filter'] ; inst = row['instrument']
-            if inst=='WFC3/UVIS':
-                inst_key = 'WFC3_UVIS'
-            elif 'WFC3' in inst and 'IR' in inst:
-                inst_key = 'WFC3_IR'
-            elif 'ACS' in inst and 'WFC' in inst:
-                inst_key = 'ACS_WFC'
-            elif 'ACS' in inst and 'HRC' in inst:
-                inst_key = 'ACS_HRC'
-            elif 'WFPC2' in inst:
-                inst_key = 'WFPC2'
-            else:
+        photkeys = []
+        inst_filt = [self.get_inst_filt(row) for row in phottable]
+        for photkey in inst_filt:
+            if table and photkey in table.keys():
                 continue
-
-            key = inst_key+'_'+filt
-
-            if table and key in table.keys():
-                remove_filts.append(filt)
-                continue
-
-            photkeys.append(key)
-
-        for filt in remove_filts:
-            filts.remove(filt)
+            elif photkey not in photkeys:
+                photkeys.append(photkey)
 
         if not photkeys:
             return(table)
-
-        elif table:
-            for key in photkeys:
+        
+        for key in photkeys:
+            if key not in table.keys():
                 newcol = Column([None]*len(table), name=key)
                 table.add_column(newcol)
 
@@ -1146,36 +1246,26 @@ class sed_fitter(object):
             ratio = float(data[3])
             period = float(data[4])
 
-            add_row = True
-            if table:
-                mask = (table['mass']==mass) & (table['ratio']==ratio) &\
-                    (table['period']==period)
-
-                if len(table[mask])==1:
-                    add_row = False
-                    idx = np.where(mask)[0]
-                    if bpass_type=='terminal':
-                        row = cmd_table[-1]
-                        for key,filt in zip(photkeys,filts):
-                            if filt.lower() not in filtmap.keys():
-                                continue
-                            colnum = filtmap[filt.lower()]
-                            mag = row['col'+str(colnum+1)]
-                            table[idx][key]=mag
-
-            if add_row:
+            if True:
                 if bpass_type=='terminal':
                     row = cmd_table[-1]
                     table_data = [mass, ratio, period]
 
-                    for filt in filts:
-                        colnum = filtmap[filt.lower()]
-                        mag = row['col'+str(colnum)]
-                        table_data.append(mag)
+                    for photkey in photkeys:
+                        filt = photkey.split('_')[-1]
+                        if filt in filtmap.keys():
+                            colnum = filtmap[filt]
+                            mag = row['col'+str(colnum)]
+                            table_data.append(mag)
+                        elif filt.lower() in filtmap.keys():
+                            colnum = filtmap[filt.lower()]
+                            mag = row['col'+str(colnum)]
+                            table_data.append(mag)
+                        else:
+                            table_data.append(float('NaN'))
 
                     if not table:
                         table_header = ['mass','ratio','period']+photkeys
-
                         table_data = [[dat] for dat in table_data]
                         table = Table(table_data, names=table_header)
                     else:
@@ -1212,6 +1302,8 @@ class sed_fitter(object):
                 else:
                     mags.append(mag1-mag2)
             elif data not in row.colnames:
+                mags.append(float('NaN'))
+            elif row[data] is None:
                 mags.append(float('NaN'))
             elif float(row[data])==99.0:
                 mags.append(float('NaN'))
@@ -1265,7 +1357,7 @@ class sed_fitter(object):
         guess = None
         if self.model_type=='mist_terminal': guess = np.array([30.0])
         elif self.model_type=='mist': guess = np.array([1.0e7, 30.0])
-        elif self.model_type=='blackbody': guess = np.array([4.4, 3500.])
+        elif self.model_type=='blackbody': guess = np.array([0.1, 5700.])
         elif self.model_type=='pickles': guess = np.array([5.077, 6353.])
         elif self.model_type=='bpass': guess = np.array([19.0, 0.1, 0.6])
         elif self.model_type=='rsg':
@@ -1331,7 +1423,8 @@ class sed_fitter(object):
         return(backend)
 
     def sample_params(self, params, prob, ndim, nsamples=None, downsample=1.0):
-        mask = np.isinf(np.abs(prob))
+
+        mask = np.isinf(np.abs(prob)) | np.isnan(prob)
         if all(mask):
             print('WARNING: all probabilities are bad.  Try wider param range')
             return(params[0])
@@ -1339,6 +1432,7 @@ class sed_fitter(object):
             params = params[~mask]
         else:
             params = params[~mask,:]
+
         prob = -1.0 * prob[~mask]
         prob = prob / np.min(prob)
 
@@ -1365,7 +1459,7 @@ class sed_fitter(object):
         return(params_sample, prob_sample)
 
     def calculate_param_best_fit(self, params, prob, ndim, name, show=True,
-        sampled=False):
+        sampled=False, return_uncertainty=False):
 
         # Parameters might have already been sampled
         if not sampled:
@@ -1377,6 +1471,9 @@ class sed_fitter(object):
         n = int(self.significant_figures)
         out_fmt = '{0:<18}: {1:>12} + {2:>12} - {3:>12}'
 
+        mask = ~np.isnan(params_sample)
+        params_sample = params_sample[mask]
+
         # Get 16-50-84 values for param_sample now that we've restricted sample
         # to chi2 bounds
         best = np.percentile(params_sample, 50)
@@ -1384,7 +1481,10 @@ class sed_fitter(object):
         maxval = np.percentile(params_sample, 84)
 
         mcmc = utilities.round_to_n(best, n)
-        digits = int(np.ceil(np.log10(mcmc)))
+        log_mcmc = np.log10(mcmc)
+        if np.isnan(log_mcmc):
+            log_mcmc = 0.0
+        digits = int(np.ceil(log_mcmc))
         decimal_place = -1 * (digits - n)
         if float(mcmc)==int(mcmc) and decimal_place < 1:
             mcmc=int(mcmc)
@@ -1399,6 +1499,11 @@ class sed_fitter(object):
         if float(maxval)==int(maxval) and decimal_place < 1:
             maxval=int(maxval)
 
+        if name=='luminosity':
+            logL_unc = 2.17 * self.distance[1]/self.distance[0]
+            minval = minval + logL_unc
+            maxval = maxval + logL_unc
+
         if np.log10(mcmc)<-3:
             str_fmt = '%.3e'
             mcmc = str_fmt % mcmc
@@ -1412,7 +1517,10 @@ class sed_fitter(object):
 
         if show: print(out_fmt.format(name, mcmc, maxval, minval))
 
-        return(best)
+        if return_uncertainty:
+            return(float(maxval), float(minval))
+        else:
+            return(best)
 
     def run_emcee(self, phottable, sigma=1.0, nsteps=5000, nwalkers=100,
         guess_type='params'):
@@ -1495,19 +1603,33 @@ class sed_fitter(object):
         if self.verbose:
             print('Current number of samples in backend:', len(sample))
             mask = ~np.isinf(prob)
-            print('Minimum chi^2 is:','%.4f'%(-1.0*np.max(prob)))
+            print('Minimum chi^2 is:','%.7f'%(-1.0*np.max(prob)))
             print('\n\n')
         params = [] ; blobs = []
         for i,param in enumerate(self.model_fit_params):
             p=self.calculate_param_best_fit(sample[:,i], prob, ndim, param)
             params.append(p)
+            if param=='luminosity' and self.options.report_mist_mass:
+                mist_table = self.load_mist(None, mist_type='terminal',
+                    feh=0.0, use_inst='Theoretical', return_models=True)
+                # Get luminosity uncertainty
+                unc=self.calculate_param_best_fit(sample[:,i], prob, ndim, param,
+                    return_uncertainty=True)
+                idx = np.argmin(np.abs(mist_table['log_L'].data-p))
+                print('Best MIST mass:',mist_table[idx]['mass'])
+                p_high = p+unc[0] ; p_low = p-unc[1]
+                idx_low = np.argmin(np.abs(mist_table['log_L']-p_low))
+                idx_high = np.argmin(np.abs(mist_table['log_L']-p_high))
+                print('Best MIST range:',mist_table[idx_low]['mass'],
+                    mist_table[idx_high]['mass'])
         for i,param in enumerate(self.model_fit_blobs):
             b=self.calculate_param_best_fit(blob[:,i], prob, ndim, param)
             blobs.append(b)
 
         if self.distance[1]!=0.0 and self.verbose:
-            print('Distance: ',self.distance[0],'+/-',self.distance[1])
             logL_unc = 2.17 * self.distance[1]/self.distance[0]
+            print('Distance: ',self.distance[0],'+/-',self.distance[1])
+            print('Distance modulus:','%.4f'%self.dm,'+/-','%.4f'%logL_unc)
             print('Additional uncertainty on log_L:','%.4f'%logL_unc)
             print('Fractional uncertainty on log_R:','%.4f'%(logL_unc/2))
 
@@ -1560,19 +1682,23 @@ class sed_fitter(object):
             tau = param_sample[:,kidx]
             tau = tau[:,0]
 
-            mass = 4 * np.pi * tau * dust.kappa_V**-1 * radius * 2 * radius *\
-                constants.DUST_BB_MASS
+            dust_mass = 4 * np.pi * tau * dust.kappa_V**-1 * radius * 2 *\
+                radius * constants.DUST_BB_MASS
+            total_mass = dust_mass / dust.DUST_TO_GAS
 
             # Mass-loss rate assuming v_wind = 10 km/s
+            v_wind = constants.RSG_V_WIND.to(u.km/u.s).value
             mlr = 4 * np.pi * tau * dust.kappa_V**-1 * radius *\
-                constants.DUST_BB_WIND * constants.RSG_V_WIND
+                constants.DUST_BB_WIND * v_wind / dust.DUST_TO_GAS
 
             r=self.calculate_param_best_fit(np.log10(bb_lum), prob_sample, ndim,
                 'dust luminosity', sampled=True)
             r=self.calculate_param_best_fit(radius, prob_sample, ndim,
                 'dust radius', sampled=True)
-            r=self.calculate_param_best_fit(mass, prob_sample, ndim,
+            r=self.calculate_param_best_fit(dust_mass, prob_sample, ndim,
                 'dust mass', sampled=True)
+            r=self.calculate_param_best_fit(total_mass, prob_sample, ndim,
+                'total mass', sampled=True)
             r=self.calculate_param_best_fit(mlr, prob_sample, ndim,
                 'mass-loss rate', sampled=True)
 
@@ -1754,13 +1880,13 @@ class sed_fitter(object):
 
         print('Input model parameters:')
         for name,par in zip(self.model_fit_params, theta):
-            par = '%4.4f'%float(par)
+            par = '%.4f'%float(par)
             print(f'{name} = {par}')
 
         if self.model_fit_blobs:
             print('Input host extinction:')
             for name,par in zip(self.model_fit_blobs, blobs):
-                par = '%4.5f'%par
+                par = '%.4f'%par
                 print(f'{name} = {par}')
 
         print('Av =', Av)
@@ -1789,15 +1915,15 @@ class sed_fitter(object):
                 chi=chi))
 
         if self.extinction['likelihood']:
-            value = np.asscalar(self.extinction['interpolation'](Av, Rv))
+            value = self.extinction['interpolation'](Av, Rv).item()
             print('Total Extinction chi^2:', value)
 
         if np.isinf(chi2):
             print('Sum chi^2 for best: inf')
         elif isinstance(chi2, float):
-            print('Sum chi^2 for best: {0}'.format('%7.4f'%chi2))
+            print('Sum chi^2 for best: {0}'.format('%.7f'%chi2))
         else:
-            print('Sum chi^2 for best:', np.asscalar(-1.0*chi2))
+            print('Sum chi^2 for best: {0}'.format('%.7f'%(-1.0*chi2.item())))
 
     def get_wavelength_widths(self, spectrum, bandpasses):
 
@@ -1805,7 +1931,7 @@ class sed_fitter(object):
         for bp in bandpasses:
             kwargs = {'force':'taper','binset': self.waves}
             obs = S.Observation(spectrum, bp, **kwargs)
-            wave.append(obs.efflam())
+            wave.append(bp.pivot())
             width.append(bp.rectwidth()/2.)
 
         return(np.array(wave), np.array(width))

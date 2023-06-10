@@ -1,0 +1,43 @@
+# %ECSV 0.9
+# ---
+# datatype:
+# - {name: MJD, datatype: string}
+# - {name: Instrument, datatype: string}
+# - {name: Filter, datatype: string}
+# - {name: Exposure, datatype: float64}
+# - {name: Magnitude, datatype: float64}
+# - {name: Uncertainty, datatype: float64}
+# - {name: Use, datatype: uint8}
+# meta: !!omap
+# - {name: 2023ixf }
+# - {ra: 210.910674637 }
+# - {dec: 54.3116510708 }
+# - {distance: 6.85 }
+# - {dist_error: 0.15 }
+# - {host_ebv: 0.033 }
+# - {host_rv: 3.1 }
+# - {magsystem: ab }
+# - {host_galaxy: M101 }
+# - {discovery_date: 2023-05-19T17:27:15.000 }
+# schema: astropy-2.0
+MJD            Instrument     Filter  Exposure        Magnitude Uncertainty Use
+52594.02153833 ACS/WFC        F814W     720.000       24.881    0.059       1
+53045.00689815 ACS/WFC        F658N    2440.000       25.332    0.284       0
+58207.43844907 ACS/WFC        F658N    5770.000       25.488    0.000       0
+52594.00959491 ACS/WFC        F555W     720.000       27.099    0.000       1
+52593.99328704 ACS/WFC        F435W     900.000       27.393    0.000       1
+58207.45609954 ACS/WFC        F435W    7423.000       27.799    0.000       1
+51261.03903935 WFPC2          F675W     900.000       26.422    0.230       1
+51346.05293357 WFPC2          F547M    1000.000       26.416    0.000       1
+51261.11195602 WFPC2          F547M    1420.000       26.273    0.000       1
+52878.32239583 WFPC2          F336W    2400.000       27.025    0.000       1
+51260.97862269 WFPC2          F656N    1360.000       23.433    0.000       1
+51345.98973380 WFPC2          F656N    1200.000       23.776    0.000       1
+56735.85706019 WFC3/UVIS      F673N    1310.000       24.629    0.000       1
+-------------- Spitzer/IRAC   Ch1     20628.000       20.537    0.234       1
+-------------- Spitzer/IRAC   Ch2     23990.000       20.450    0.220       1
+55304.50416667 Gemini/NIRI    Kcont    2550.000       20.719    0.081       1
+56109.29688079 Mayall/NEWFIRM Ks        920.000       20.740    0.151       1
+56108.28935417 Mayall/NEWFIRM H         750.000       20.359    0.000       1
+56107.32408565 Mayall/NEWFIRM J         540.000       20.184    0.000       1
+

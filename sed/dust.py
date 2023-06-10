@@ -3,6 +3,7 @@ import numpy as np
 from scipy import interpolate
 from scipy.integrate import simps
 import pysynphot as S
+import sys
 
 dustdir = 'data/dust/'
 
@@ -14,7 +15,10 @@ temp = np.array(temp)
 # This is the total integrated flux of a source with Lum = 1 Lsun in units of
 # erg/s/cm2.  Used to renormalize the RSG spectrum.  This is equivalent to
 # 3.839e33/(4 * pi * (10 * 3.08568025e18)^2) for 1 Lsol at 10 pc.
-FLUX_SCALE = 3.20853223e-7
+FLUX_SCALE = 3.22398177e-7
+
+# Dust-to-gas mass ratio assumption
+DUST_TO_GAS = 0.01
 
 data10 = np.loadtxt(dustdir+'data10.dat', unpack=True, dtype=float)
 #data05 = np.loadtxt(dustdir+'data05.dat', unpack=True, dtype=float)
@@ -22,11 +26,7 @@ data10 = np.loadtxt(dustdir+'data10.dat', unpack=True, dtype=float)
 #data00 = np.loadtxt(dustdir+'data00.dat', unpack=True, dtype=float)
 
 kappa = np.loadtxt(dustdir+'dust01_trans.dat')
-# Normalize kappa
-kappa = kappa/np.max(kappa)
 wavelength = np.loadtxt(dustdir+'wavelength.dat')
-# kappa_V, the opacity in V-band calculated from dust01_trans.dat
-kappa_V = 78.5157020156
 
 def rebin(a, newshape):
     newarray = np.zeros(newshape)
@@ -42,6 +42,19 @@ rsg_10 = interpolate.interp2d(wavelength, temp, data10)
 #rsg_05 = interpolate.interp2d(wavelength, temp[:data05.shape[0]], data05)
 #rsg_0_5 = interpolate.interp2d(wavelength, temp[:data0_5.shape[0]], data0_5)
 #rsg_00 = interpolate.interp2d(wavelength, temp[:data00.shape[0]], data00)
+
+# kappa_V, the opacity in V-band calculated from dust01_trans.dat
+bp = S.ObsBandpass('johnson,V')
+sp1 = S.ArraySpectrum(wavelength, kappa, 
+    fluxunits='counts', waveunits='angstrom')
+sp2 = S.ArraySpectrum(wavelength, np.array([1.0]*len(wavelength)), 
+    fluxunits='counts', waveunits='angstrom')
+obs1 = S.Observation(sp1, bp, binset=wavelength)
+obs2 = S.Observation(sp2, bp, binset=wavelength)
+kappa_V=obs1.effstim('counts')/obs2.effstim('counts')
+
+# Normalize kappa for calculation below so we can derive correct luminosity
+kappa = kappa/np.max(kappa)
 
 # Graphite, Rout/Rin=2
 def get_avg2(x, p):
@@ -170,7 +183,7 @@ def get_bb_lum(p, rsg_model='10', dust_model='g2', sptype='all', masked=True):
 # Inputs are:
 #      x = Name of filter function (provided in filters/ directory)
 #      p = [p0 = tau_V from Kochanek et al. (2012),
-#           p1 = Scaling constant for star flux,
+#           p1 = Scaling constant for star flux (should be Lsol),
 #           p2 = Temperature of input model star
 #           p3 = temperature of dust]
 def get_ext_bb(p, rsg_model='10', dust_model='g2', sptype='all', masked=True):
@@ -206,12 +219,37 @@ def get_ext_bb(p, rsg_model='10', dust_model='g2', sptype='all', masked=True):
 
     if sptype=='b' or sptype=='bb' or sptype=='dust' or sptype=='blackbody':
         sp = S.ArraySpectrum(w, bb, fluxunits='flam')
-        return(sp)
     elif sptype=='ss' or sptype=='scaled_star':
         sp = S.ArraySpectrum(w, obsflux, fluxunits='flam')
-        return(sp)
     else:
         sp = S.ArraySpectrum(w, obsflux + bb, fluxunits='flam')
         mask = sp.flux < 0
-        return(sp)
+
+    if sptype=='all':
+        Lsol = simps(sp.flux, sp.wave)*4*np.pi*(10*3.08568025e18)**2/(3.839e33)
+        try:
+            assert np.abs((Lsol-p[1])/p[1]) < 3.0e-2
+        except AssertionError:
+            print(p)
+            print(Lsol)
+            print(np.abs((Lsol-p[1])/p[1]))
+            print(rsg_model, dust_model, masked)
+            sys.exit()
+
+    return(sp)
+
+def get_rv(p, rsg_model='10', dust_model='g2'):
+
+    w = wavelength
+    flux = get_rsg(p[1], p[2], model=rsg_model)
+
+    mask = (wavelength > 3500.0) & (wavelength < 1.0e5)
+    kappa = np.loadtxt(dustdir+'dust01_trans.dat')
+    w = w[mask]
+    flux = flux[mask]
+    kappa = kappa[mask]
+
+    a_dust = get_dust(w, p[0], model=dust_model)
+    obsflux = flux * 10**(-0.4*a_dust)
+    bb_scale = simps(flux-obsflux, w)
 
