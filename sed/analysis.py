@@ -1349,7 +1349,7 @@ class sed_fitter(object):
                         best = np.argmin(flat_prob)
                         if guess_type=='params': return(flat_samples[best])
                         if guess_type=='blobs': return(flat_blobs[best])
-            except OSError:
+            except (OSError, KeyError):
                 pass
 
         if guess_type=='blobs': return(np.array([2.3, 4.4167]))
@@ -1896,7 +1896,7 @@ class sed_fitter(object):
         # format output for each observation
 
         print('Model fit by observation:')
-        fmt = '{mjd:<12} {inst:<20} {mag:<8} {err:<7} {model:<9} {chi:>10}'
+        fmt = '{mjd:<14} {inst:<20} {mag:<8} {err:<7} {model:<9} {chi:>10}'
         print(fmt.format(mjd='MJD', inst='INST_FILT',mag='MAG',err='MAGERR',
             model='MODEL',chi='CHI2'))
         for val in zip(inst_filt, mag, magerr, model, mjd):

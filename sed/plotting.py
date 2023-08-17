@@ -98,6 +98,8 @@ class sed_plot(object):
         parser.add_argument('--notau', default=False, action='store_true',
             help='For the RSG model, set this flag to ignore tau_V and Tdust '+\
             ' parameters as part of fit.')
+        parser.add_argument('--simple-rsg', default=False, action='store_true',
+            help='Do not add additional SEDs for the RSG model plot.')
 
         return(parser)
 
@@ -151,7 +153,7 @@ class sed_plot(object):
                 
         # Now calculate observed flux and re-generate spectrum
         obsflux = spectrum.flux * extinction1.flux * extinction2.flux
-        obsflux = obsflux/(np.pi*distance**2)
+        obsflux = obsflux/(distance**2)
         sp = S.ArraySpectrum(spectrum.wave, obsflux)
 
         return(sp)
@@ -165,13 +167,6 @@ class sed_plot(object):
         inst_filt = list(inst_filt)
         mag = list(mag)
         magerr = list(magerr)
-
-        inst_filt.append('SPITZER_IRAC_CH3')
-        inst_filt.append('SPITZER_IRAC_CH4')
-        mag.append(20.68)
-        mag.append(20.45)
-        magerr.append(0.0)
-        magerr.append(0.0)
 
         inst_filt = np.array(inst_filt)
         mag = np.array(mag)
@@ -256,8 +251,6 @@ class sed_plot(object):
                         markeredgewidth=0.4*self.figsize, uplims=uplim)
 
             if model=='blackbody':
-                print(sp.wave)
-                print(sp.flux)
 
                 bbwave = sp.wave 
                 bbsflux = sp.flux 
@@ -267,21 +260,23 @@ class sed_plot(object):
                 bbsflux = np.flip(bbsflux[idx])
 
                 bbflux = integrate.simps(bbwave, bbsflux)
-                print(bbflux)
 
                 distcm = self.fit.distance[0]*3.086e+24
                 lum = 4*np.pi*(distcm)**2*bbflux
+
+                print('\n\nBLACKBODY MODEL VALIDATION\n'+'#'*80+'\n')
                 print('temperature [K]:',str(int(np.round(params[1], decimals=-1))))
                 print('peak flux [erg/s/cm2/angstrom]:',np.max(sp.flux))
                 print('integrated flux [erg/s/cm2]:',bbflux)
                 print('distance [cm]:',distcm)
                 print('luminosity [erg/s]:',lum)
                 print('luminosity [log(Lsol)]:',np.log10(lum/3.839e33))
+                print('\n\n')
 
-            ax.plot(sp.wave, sp.flux, label=title, zorder=0,
-                color=pallette[i+2], linewidth=0.6*self.figsize)
+            ax.plot(sp.wave, sp.flux, label=title, zorder=1,
+                color=palette[i+2], linewidth=0.6*self.figsize)
 
-            if model=='rsg':
+            if model=='rsg' and not kwargs['simple_rsg']:
                 if len(params)==2:
                     params = [0.01,params[0],params[1],200.]
                 else:
@@ -289,11 +284,13 @@ class sed_plot(object):
 
                 sp1 = self.fit.create_rsg(*params, sptype='star')
                 sp2 = self.fit.create_rsg(*params, sptype='dust')
+                sp3 = self.fit.create_rsg(*params, sptype='intrinsic')
 
                 if fluxspace: sp1 = self.convert_to_fluxspace(sp1, ext)
                 if fluxspace: sp2 = self.convert_to_fluxspace(sp2, ext)
+                if fluxspace: sp3 = self.convert_to_fluxspace(sp3, ext)
 
-                ax.plot(sp1.wave, sp1.flux, label='Reddened RSG', zorder=1,
+                ax.plot(sp1.wave, sp1.flux, label='Reddened RSG', zorder=2,
                     color='blue', linewidth=0.6*self.figsize)
 
                 dust_label = '{0} K dust'
@@ -302,7 +299,10 @@ class sed_plot(object):
                 ax.plot(sp2.wave, sp2.flux, label=dust_label, zorder=1,
                     color='red', linewidth=0.6*self.figsize)
 
-        ylim = [0.5*np.min(flux-fluxerr), 1.5*np.max(flux+fluxerr)]
+                ax.plot(sp3.wave, sp3.flux, label='Unreddened RSG', zorder=0,
+                    color='plum', linewidth=0.6*self.figsize)
+
+        ylim = [0.5*np.min(flux-fluxerr), 1.2*np.max(flux+fluxerr)]
         xlim = [0.7*np.min(wave-width), 1.2*np.max(wave+width)]
         ax.set_yscale('log')
         ax.set_ylim(ylim)
@@ -351,7 +351,7 @@ class sed_plot(object):
             ax.set_xticks([3000,10000,30000])
             ax.set_xticklabels(['0.3','1.0','3.0'])
 
-        legend = ax.legend(loc='best', fontsize=4.0*self.figsize)
+        legend = ax.legend(loc='best', fontsize=3.6*self.figsize)
 
         # Outfile
         outfile = self.options.objname.strip() + '_sed.eps'
@@ -482,7 +482,7 @@ class sed_plot(object):
 
         for i,mass in enumerate(sorted(np.unique(tracks['mass']))):
 
-            color = pallette[i%len(pallette)]
+            color = palette[i%len(palette)]
             color=black
 
             mass_track = tracks[tracks['mass']==mass]
@@ -798,7 +798,7 @@ class sed_plot(object):
 
         for i,mass in enumerate(sorted(np.unique(tracks['mass']))):
 
-            color = pallette[i%len(pallette)]
+            color = palette[i%len(palette)]
             color=black
 
             mass_track = tracks[tracks['mass']==mass]

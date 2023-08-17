@@ -13,7 +13,7 @@ goldenrod=color(239,139,8)
 orange=color(204,102,0)
 lightred=color(255,178,178)
 
-pallette = [red,orange,goldenrod,green,blue,magenta]
+palette = [red,orange,goldenrod,green,blue,magenta]
 
 SOLAR_LUM_CGS = u.solLum.to(u.erg/u.second)
 
@@ -72,6 +72,8 @@ sf11rv = {
     'i':1.698,
     'z':1.263,
     'Y':1.2245,
+    'ATLAS_O': 1.992,
+    'ATLAS_C': 2.794,
     'PS1_GPC1_g':3.172,
     'PS1_GPC1_r':2.271,
     'PS1_GPC1_i':1.682,
