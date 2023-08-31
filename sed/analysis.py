@@ -257,8 +257,8 @@ class sed_fitter(object):
             self.bounds['temperature']=[2600.0, 4500.0]
 
         if model_type=='pickles':
-            self.bounds['luminosity']=[3.0,6.0]
-            self.bounds['temperature']=[2500.35,39810.7]
+            self.bounds['luminosity']=[3.0,7.0]
+            self.bounds['temperature']=[2500.35,40000.]
 
     # For a cumulative distribution function cdf with dimensions N, M
     # corresponding to arr1 and arr2, respectively, create a uniform random
@@ -643,8 +643,6 @@ class sed_fitter(object):
             LL = LL.ravel() ; TT = TT.ravel()
 
             inst_filt = [self.get_inst_filt(row) for row in phottable]
-            remove_keys = []
-            models = None
 
             pfile = self.dirs['data']+self.files['pickles']['interp']
             if os.path.exists(pfile):
@@ -652,10 +650,15 @@ class sed_fitter(object):
                 # Remove inst_filt pairs that we don't need to calculate
                 for key in models.keys():
                     if key in inst_filt:
+                        if self.verbose:
+                            print('Removing',key,'already in model file')
                         inst_filt.remove(key)
                 # Exit if we have all models
                 if not inst_filt:
                     return(models)
+            else:
+                models = {}
+
 
             # Create models for the ones that don't already exist
             mags = {}
@@ -677,7 +680,6 @@ class sed_fitter(object):
 
             bar.finish()
 
-            models = {}
             for val in inst_filt:
                 models[val] = interpolate.SmoothBivariateSpline(LL,
                     TT, list(mags[val].ravel()), kx=2,ky=2)

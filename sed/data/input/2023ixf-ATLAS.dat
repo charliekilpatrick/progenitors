@@ -1,0 +1,25 @@
+# %ECSV 0.9
+# ---
+# datatype:
+# - {name: MJD, datatype: string}
+# - {name: Instrument, datatype: string}
+# - {name: Filter, datatype: string}
+# - {name: Exposure, datatype: float64}
+# - {name: Magnitude, datatype: float64}
+# - {name: Uncertainty, datatype: float64}
+# - {name: Use, datatype: uint8}
+# meta: !!omap
+# - {name: 2023ixf }
+# - {ra: 210.910674637 }
+# - {dec: 54.3116510708 }
+# - {distance: 6.85 }
+# - {dist_error: 0.15 }
+# - {host_ebv: 0.033 }
+# - {host_rv: 3.1 }
+# - {magsystem: ab }
+# - {host_galaxy: M101 }
+# - {discovery_date: 2023-05-19T17:27:15.000 }
+# schema: astropy-2.0
+MJD         Instrument   Filter Exposure Magnitude Uncertainty Use
+----------  ATLAS        o      0.0      20.70     0.00        1
+

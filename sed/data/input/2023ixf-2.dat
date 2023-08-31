@@ -1,0 +1,28 @@
+# %ECSV 0.9
+# ---
+# datatype:
+# - {name: MJD, datatype: string}
+# - {name: Instrument, datatype: string}
+# - {name: Filter, datatype: string}
+# - {name: Exposure, datatype: float64}
+# - {name: Magnitude, datatype: float64}
+# - {name: Uncertainty, datatype: float64}
+# - {name: Use, datatype: uint8}
+# meta: !!omap
+# - {name: 2023ixf }
+# - {ra: 210.910674637 }
+# - {dec: 54.3116510708 }
+# - {distance: 6.85 }
+# - {dist_error: 0.15 }
+# - {host_ebv: 0.033 }
+# - {host_rv: 3.1 }
+# - {magsystem: ab }
+# - {host_galaxy: M101 }
+# - {discovery_date: 2023-05-19T17:27:15.000 }
+# schema: astropy-2.0
+MJD            Instrument     Filter  Exposure        Magnitude Uncertainty Use
+-------------- Spitzer/IRAC   Ch1     20628.000       20.450    0.180       1
+-------------- Spitzer/IRAC   Ch2     23990.000       20.080    0.160       1
+56109.29688079 Mayall/NEWFIRM Ks        920.000       20.370    0.190       1
+56107.32408565 Mayall/NEWFIRM J         540.000       21.090    0.200       1
+
