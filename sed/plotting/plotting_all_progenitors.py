@@ -53,6 +53,9 @@ class sed_plot(object):
             'f_lambda': flux.format('f', flux_fmt,
                 ' erg s'+r'$^{-1}$'+' cm'+r'$^{-2}$~\AA$^{-1}$'),
             'log_T': r'$\log(T_{\mathrm{eff}}/\mathrm{K})$',
+            'Teff': r'$T_{\mathrm{eff}}/\mathrm{K}$',
+            'Tdust': r'$T_{\mathrm{dust,eff}}/\mathrm{K}$',
+            'A_V': r'$A_{V}$',
             'log_L': r'$\log(L/L_{\odot})$',
             'initial_mass': r'$M/M_{\odot}$',
             'period': r'$\log(P/\mathrm{1 day})$',
@@ -115,6 +118,8 @@ class sed_plot(object):
 
             sp = None
             if model=='blackbody':
+                print(params)
+                params=[4.45,2900]
                 sp = self.fit.create_blackbody(*params)
                 plottemp = ''
                 title=str(int(np.round(params[1], decimals=-2)))+' K'
@@ -126,6 +131,12 @@ class sed_plot(object):
                 title = title.replace('V','I')
                 sp.convert('flam')
                 sp = S.ArraySpectrum(sp.wave, sp.flux/1.086)
+            elif model=='rsg':
+                print(params)
+                params[1]=4.8
+                sp = self.fit.create_rsg(*params)
+                title=str(int(np.round(params[2], decimals=-2)))+' K RSG + '+\
+                    str(int(np.round(params[3], decimals=-2)))+' K dust'
 
             # Spectra should be scaled to absolute magnitudes, so flux at 10 pc,
             # so need to rescale by distance/10pc
@@ -153,6 +164,17 @@ class sed_plot(object):
                 fluxcorr = True
 
             if i==0:
+                uplims = fluxerr==0.0
+                print(uplims)
+                print(fluxerr)
+                nlim = len(wave[uplims])
+                ax.errorbar(wave[uplims], flux[uplims],
+                    yerr=0.5*flux[uplims], xerr=width[uplims],
+                    uplims=True,
+                    marker='o', color=red, ls='none', capsize=0.5*self.figsize,
+                    linewidth=0.6*self.figsize, zorder=5, ms=2*self.figsize,
+                    markeredgecolor=black, markeredgewidth=0.4*self.figsize)
+
                 ax.errorbar(wave, flux, yerr=fluxerr, xerr=width,
                     marker='o', color=red, ls='none', capsize=0.5*self.figsize,
                     linewidth=0.6*self.figsize, zorder=5, ms=2*self.figsize,
@@ -161,9 +183,11 @@ class sed_plot(object):
             ax.plot(sp.wave, sp.flux, label=title, zorder=0,
                 color=palette[i+2], linewidth=0.6*self.figsize)
 
-        ylim = [0.5*np.min(flux-fluxerr), 1.4*np.max(flux+fluxerr)]
+        ylim = [0.5*np.min(flux-fluxerr), 2.1*np.max(flux+fluxerr)]
         xlim = [0.7*np.min(wave-width), 1.2*np.max(wave+width)]
         ax.set_yscale('log')
+        if np.max(xlim)>2.0e4:
+            ax.set_xscale('log')
         ax.set_ylim(ylim)
         ax.set_xlim(xlim)
 
@@ -201,7 +225,7 @@ class sed_plot(object):
         ax.set_yticks(ytickval, minor=True)
         ax.set_yticklabels(yticklabel, minor=True)
 
-        legend = ax.legend(loc='lower right', fontsize='large')
+        legend = ax.legend(loc='upper right', fontsize=4.0*self.figsize)
         self.close_plot('sed.eps')
 
     def load_yoon(self, file):
@@ -295,14 +319,14 @@ class sed_plot(object):
 
     def hr(self, mode='single', progenitors='progenitors.dat',
         add_progenitors=True,add_yoon=False,add_lbvs=False,add_data=True,
-        add_rsg=False,limits=False, limit_Av=None):
+        add_rsg=False,limits=False):
 
         fig, ax = self.setup_plot()
         self.setup_axis_titles(ax, 'log_T', 'log_L')
 
         # Get range of model track data
         if mode=='single':
-            tracks = self.load_tracks('mist', [8,10,13,17,23,30],
+            tracks = self.load_tracks('mist', [8,10,15,17,23,30,40,60,80],
                 clip_early=3.0e4, clip_tail=4.67)
         elif mode=='binary':
             tracks = self.load_tracks('bpass', [[19,0.1,0.6]])
@@ -336,7 +360,7 @@ class sed_plot(object):
             label_logL = mass_track['log_L'].data[idx]
 
             ax.plot(mass_track['log_Teff'].data, mass_track['log_L'].data,
-                color=color, linewidth=0.4*self.figsize,zorder=10)
+                color=color, linewidth=0.4*self.figsize,zorder=1)
 
             if mode=='binary':
                 terminal = mass_track[-1]
@@ -358,6 +382,14 @@ class sed_plot(object):
 
                 h_free_pos = [h_free['log_Teff'],h_free['log_L']]
 
+                #ax.plot(h_free_pos[0],h_free_pos[1],marker='o',
+                #    color=color,ms=4*self.figsize)
+                #ax.text(h_free_pos[0]+0.0070*self.figsize*(xlim[1]-xlim[0]),
+                #    h_free_pos[1]+0.0100*self.figsize*(ylim[1]-ylim[0]),
+                #    r'$M_{H}=0.05~M_{\odot}$',
+                #    horizontalalignment='center', verticalalignment='center',
+                #    color=color)
+
                 rlof_on_idx = np.argmin(mass_track['rlof_rate'].data)
 
                 idx = np.argmin(mass_track['log_Teff'])
@@ -378,14 +410,14 @@ class sed_plot(object):
                 idx = np.argmax(mass_track['log_Teff'].data)
                 label_teff = mass_track['log_Teff'].data[idx]
                 label_logL = mass_track['log_L'].data[idx]
-                textpos = [label_teff+0.0045*self.figsize*(xlim[0]-xlim[1]),
-                    label_logL-0.002*self.figsize*(ylim[1]-ylim[0])]
+                textpos = [label_teff+0.0065*self.figsize*(xlim[0]-xlim[1]),
+                    label_logL-0.004*self.figsize*(ylim[1]-ylim[0])]
             elif mode=='binary':
                 idx = 0
                 label_teff = mass_track['log_Teff'].data[idx]
                 label_logL = mass_track['log_L'].data[idx]
-                textpos = [label_teff+0.0035*self.figsize*(xlim[0]-xlim[1]),
-                    label_logL-0.002*self.figsize*(ylim[1]-ylim[0])]
+                textpos = [label_teff+0.0065*self.figsize*(xlim[0]-xlim[1]),
+                    label_logL-0.004*self.figsize*(ylim[1]-ylim[0])]
 
                 ylim = [0.980*np.min(mass_track['log_L'].data),
                         1.060*np.max(mass_track['log_L'].data)]
@@ -395,10 +427,8 @@ class sed_plot(object):
                 ax.set_ylim(ylim)
                 ax.set_xlim(xlim)
 
-            print(textpos[0], textpos[1],str(mass)+'$~M_{\\odot}$')
-            print(color)
             ax.text(textpos[0], textpos[1], str(mass)+r'$~M_{\odot}$',
-                color='k', zorder=10,
+                color=color, zorder=1,
                 horizontalalignment='center', verticalalignment='center')
 
         if add_progenitors:
@@ -406,12 +436,14 @@ class sed_plot(object):
 
             plot_types = [{'type':['II'],'color':red,'marker':'s','name':'SN II'},
                 {'type':['IIb'],'color':green,'marker':'o','name':'SN IIb'},
-                {'type':['Ib','Ic'],'color':blue,'marker':'D','name':'SN Ib/c'}]
+                {'type':['Ib','Ic'],'color':blue,'marker':'D','name':'SN Ib/c'},
+                {'type':['IIn'], 'color': magenta,'marker':'P','name':'SN IIn'},
+                {'type':['II-s'], 'color': black,'marker':'p','name':'SN1987A'}]
 
             for ptype in plot_types:
                 ax.errorbar([],[],marker=ptype['marker'],
                     ms=2*self.figsize,color=ptype['color'],
-                    linewidth=0.4*self.figsize,markeredgecolor=black,zorder=15,
+                    linewidth=0.4*self.figsize,markeredgecolor=black,zorder=10,
                     markeredgewidth=0.4*self.figsize,label=ptype['name'])
 
 
@@ -425,11 +457,11 @@ class sed_plot(object):
                             xerr=[row['e_log_T']],yerr=[row['e_log_L']],
                             uplims=uplims, color=ptype['color'],
                             linewidth=0.4*self.figsize,marker=ptype['marker'],
-                            ms=2*self.figsize,zorder=15,capsize=0.5*self.figsize,
+                            ms=2*self.figsize,zorder=5,capsize=0.5*self.figsize,
                             markeredgecolor=black,
                             markeredgewidth=0.4*self.figsize)
 
-            legend = ax.legend(loc='lower left',fontsize=3.6*self.figsize)
+            legend = ax.legend(loc='lower left',fontsize=3.2*self.figsize)
 
         if add_yoon:
             yoondata = self.load_yoon('data/yoon_0.02.dat')
@@ -469,7 +501,7 @@ class sed_plot(object):
                 if self.fit.model_type=='blackbody':
                     # Easiest - Then samples represent (luminosity, temperature)
                     # Generate a contour for the region encompassed by inf val
-                    photfile = self.fit.dirs['input']+'2023ixf-ATLAS.dat'
+                    photfile = self.fit.dirs['input']+'2020fqv.dat'
 
                     self.fit.set_model_type('blackbody', extinction=False)
                     self.fit.phottable = self.fit.import_phottable(photfile)
@@ -479,7 +511,7 @@ class sed_plot(object):
 
                     # These values are hard-coded from 2020fqv - should find a
                     # way to do this automatically
-                    ext=(0.085*3.1,3.1)
+                    ext=(1.67,3.22)
                     self.fit.load_extinction(val=ext)
 
                     self.fit.load_models(self.fit.phottable)
@@ -497,69 +529,33 @@ class sed_plot(object):
                     gsize=(400,500)
 
                     grid=np.zeros((gsize[0], gsize[1]))
-                    # Grid for + and - distance uncertainties
-                    grid_lo=np.zeros((gsize[0], gsize[1]))
-                    grid_hi=np.zeros((gsize[0], gsize[1]))
-                    grid_nowfpc2=np.zeros((gsize[0], gsize[1]))
                     lum_space = np.linspace(ylim[0], ylim[1], gsize[1])
                     tem_space = np.linspace(xlim[0], xlim[1], gsize[0])
-
-                    if limit_Av:
-                        limit_Ao=0.72*limit_Av
-                    else:
-                        limit_Ao=0.0
-
+                    print(ylim,xlim)
                     for ii,temp in enumerate(tem_space):
                         for jj,lum in enumerate(lum_space):
                             model,Av,Rv = self.fit.compute_model_mag(inst_filt,
                                 (lum, 10**temp), extinction=ext)
-                            if any([mmag>nmag+limit_Ao for mmag,nmag in zip(mag,model)]):
+                            if any([mmag>nmag for mmag,nmag in zip(mag,model)]):
                                 grid[ii,jj]=1
+
+                    print(len(np.where(grid==0)[0]))
+                    print(len(np.where(grid==1)[0]))
 
                     vals=np.where(grid==1)
                     idx=np.argmin(vals[1])
+                    print(idx)
+                    print(vals[1][idx])
+                    print(tem_space[vals[0][idx]],lum_space[vals[1][idx]])
 
                     levels = np.linspace(0, 1, ncols)
 
                     ax.contourf(tem_space,lum_space,np.transpose(grid),cmap=cm)
                     ax.contour(tem_space,lum_space,np.transpose(grid),
-                        linewidths=6, levels=levels, zorder=5, colors=('blue'))
-
-                    ext=(0.0,3.1)
-                    self.fit.load_extinction(val=ext)
-
-                    grid=np.zeros((gsize[0], gsize[1]))
-                    # Grid for + and - distance uncertainties
-                    grid_lo=np.zeros((gsize[0], gsize[1]))
-                    grid_hi=np.zeros((gsize[0], gsize[1]))
-                    grid_nowfpc2=np.zeros((gsize[0], gsize[1]))
-                    lum_space = np.linspace(ylim[0], ylim[1], gsize[1])
-                    tem_space = np.linspace(xlim[0], xlim[1], gsize[0])
-
-                    for ii,temp in enumerate(tem_space):
-                        for jj,lum in enumerate(lum_space):
-                            model,Av,Rv = self.fit.compute_model_mag(inst_filt,
-                                (lum, 10**temp), extinction=ext)
-                            if any([mmag>nmag+limit_Ao for mmag,nmag in zip(mag,model)]):
-                                grid[ii,jj]=1
-
-                    dx=-0.1
-
-                    ax.text(3.82, 5.45, 'Ruled Out', fontsize=3.7*self.figsize,
-                        bbox=dict(facecolor='white', 
-                            edgecolor='black', boxstyle='round,pad=0.1'),
-                        zorder=16)
-
-                    ax.errorbar([np.log10(3920)],[4.74],xerr=[0.0],yerr=[0.1],
-                        marker='*', ms=8*self.figsize,color=red,
-                        markeredgecolor=goldenrod,zorder=16,
-                        capsize=0.5*self.figsize,markeredgewidth=0.3*self.figsize,
-                        linewidth=0.4*self.figsize)
-
-                    ax.set_ylim([3.2, 5.6])
+                        linewidths=6, levels=levels, zorder=5, colors=('red'))
 
             else:
-                data=[np.log10(6800),5.3,0.025,0.2]
+                data=[np.log10(2800),4.2,0.2,0.2]
 
                 if data[0]+data[2]>xlim[0]:
                     xlim[0] = 1.045*(data[0]+data[2])
@@ -570,6 +566,283 @@ class sed_plot(object):
                 if data[1]-data[3]<ylim[0]:
                     ylim[0] = 0.95*(data[1]-data[3])
 
+                xlim[1]=3.43
+                ylim[1]=6.6
+
+                ax.set_ylim(ylim)
+                ax.set_xlim(xlim)
+
+                #ax.errorbar([data[0]],[data[1]],xerr=[data[2]],yerr=[data[3]],
+                #    marker='*', ms=4*self.figsize,color=red,
+                #    markeredgecolor=goldenrod,zorder=10,
+                #    capsize=0.5*self.figsize,markeredgewidth=0.3*self.figsize,
+                #    linewidth=0.4*self.figsize)
+
+                xposscale=0.002
+                if mode=='single': xposscale=0.002
+                elif mode=='binary': xposscale=0.007
+
+                textpos = [data[0]+xposscale*self.figsize*(xlim[0]-xlim[1]),
+                           data[1]+0.0082*self.figsize*(ylim[1]-ylim[0])]
+
+        self.close_plot('hr-'+mode+'.eps')
+
+    def cmd(self, bands, mode='single', progenitors='progenitors.dat',
+        add_progenitors=True,add_yoon=False,add_lbvs=False,add_data=True,
+        add_rsg=False,limits=False):
+
+        fig, ax = self.setup_plot()
+        self.setup_axis_titles(ax, 'log_T', 'log_L')
+
+        # Get range of model track data
+        if mode=='single':
+            tracks = self.load_tracks('mist', [8,10,17,23,30,40,60],
+                clip_early=3.0e4, clip_tail=4.67)
+        elif mode=='binary':
+            tracks = self.load_tracks('bpass', [[19,0.1,0.6]])
+
+        abs_data = tracks[bands[0]].data
+        col_data = tracks[bands[0]]-tracks[bands[1]].data
+
+        abs_range = np.max(abs_data)-np.min(abs_data)
+        col_range = np.max(col_data)-np.min(col_data)
+
+        ylim = [np.min(abs_data)-0.025*abs_range,
+                np.max(abs_data)+0.025*abs_range,]
+        xlim = [np.min(col_data)-0.025*col_range,
+                np.max(col_data)+0.025*col_range]
+
+        xlim[0]=4.00
+        ax.set_ylim(ylim)
+        ax.set_xlim(xlim)
+
+        self.setup_ticks(ax)
+
+        if add_rsg:
+            rect = mpatches.Rectangle((3.45, 4.0), 0.3, 1.6, linewidth=3,
+                edgecolor=(0,0,0,0.5), facecolor=(1,0.8,0.82,0.5))
+            rect.zorder = 0
+            ax.add_artist(rect)
+
+        for i,mass in enumerate(sorted(np.unique(tracks['mass']))):
+
+            color = palette[i%len(palette)]
+            color=black
+
+            mass_track = tracks[tracks['mass']==mass]
+
+            # Get position where track is the hottest to add label
+            idx = np.argmax(mass_track['log_Teff'].data)
+            label_teff = mass_track['log_Teff'].data[idx]
+            label_logL = mass_track['log_L'].data[idx]
+
+            ax.plot(mass_track['log_Teff'].data, mass_track['log_L'].data,
+                color=color, linewidth=0.4*self.figsize,zorder=1)
+
+            if mode=='binary':
+                terminal = mass_track[-1]
+
+                term_pos = [terminal['log_Teff'],terminal['log_L']]
+
+                ax.plot(term_pos[0],term_pos[1],marker='*',
+                    color=color,ms=6*self.figsize)
+                ax.text(term_pos[0]-0.0035*self.figsize*(xlim[1]-xlim[0]),
+                    term_pos[1]+0.0040*self.figsize*(ylim[1]-ylim[0]), 'SN',
+                    horizontalalignment='center', verticalalignment='center',
+                    color=color)
+
+                mask = mass_track['H_mass']<1.2*np.min(mass_track['H_mass'])
+                h_poor = mass_track[mask]
+
+                h_free_idx = np.argmax(h_poor['H_mass'].data)
+                h_free = h_poor[h_free_idx]
+
+                h_free_pos = [h_free['log_Teff'],h_free['log_L']]
+
+                #ax.plot(h_free_pos[0],h_free_pos[1],marker='o',
+                #    color=color,ms=4*self.figsize)
+                #ax.text(h_free_pos[0]+0.0070*self.figsize*(xlim[1]-xlim[0]),
+                #    h_free_pos[1]+0.0100*self.figsize*(ylim[1]-ylim[0]),
+                #    r'$M_{H}=0.05~M_{\odot}$',
+                #    horizontalalignment='center', verticalalignment='center',
+                #    color=color)
+
+                rlof_on_idx = np.argmin(mass_track['rlof_rate'].data)
+
+                idx = np.argmin(mass_track['log_Teff'])
+                rlof_on = mass_track[rlof_on_idx]
+
+                rlof_on_pos = [rlof_on['log_Teff'],rlof_on['log_L']]
+
+                ax.plot(rlof_on_pos[0],rlof_on_pos[1],marker='s',
+                    color=color,ms=4*self.figsize)
+
+                ax.text(rlof_on_pos[0]+0.0185*self.figsize*(xlim[1]-xlim[0]),
+                    rlof_on_pos[1]+0.0070*self.figsize*(ylim[1]-ylim[0]),
+                    r'$\mathrm{RLOF}>10^{-5}~M_{\odot}~\mathrm{yr}^{-1}$',
+                    horizontalalignment='center', verticalalignment='center',
+                    color=color)
+
+            if mode=='single':
+                idx = np.argmax(mass_track['log_Teff'].data)
+                label_teff = mass_track['log_Teff'].data[idx]
+                label_logL = mass_track['log_L'].data[idx]
+                textpos = [label_teff+0.0065*self.figsize*(xlim[0]-xlim[1]),
+                    label_logL-0.004*self.figsize*(ylim[1]-ylim[0])]
+            elif mode=='binary':
+                idx = 0
+                label_teff = mass_track['log_Teff'].data[idx]
+                label_logL = mass_track['log_L'].data[idx]
+                textpos = [label_teff+0.0065*self.figsize*(xlim[0]-xlim[1]),
+                    label_logL-0.004*self.figsize*(ylim[1]-ylim[0])]
+
+                ylim = [0.980*np.min(mass_track['log_L'].data),
+                        1.060*np.max(mass_track['log_L'].data)]
+                xlim = [1.020*np.max(mass_track['log_Teff'].data),
+                        0.980*np.min(mass_track['log_Teff'].data)]
+
+                ax.set_ylim(ylim)
+                ax.set_xlim(xlim)
+
+            ax.text(textpos[0], textpos[1], str(mass)+r'$~M_{\odot}$',
+                color=color, zorder=1,
+                horizontalalignment='center', verticalalignment='center')
+
+        if add_progenitors:
+            progdata = self.load_progenitors(self.fit.dirs['data']+progenitors)
+
+            plot_types = [{'type':['II'],'color':red,'marker':'s','name':'SN II'},
+                {'type':['IIb'],'color':green,'marker':'o','name':'SN IIb'},
+                {'type':['Ib','Ic'],'color':blue,'marker':'D','name':'SN Ib/c'}]
+
+            for ptype in plot_types:
+                ax.errorbar([],[],marker=ptype['marker'],
+                    ms=2*self.figsize,color=ptype['color'],
+                    linewidth=0.4*self.figsize,markeredgecolor=black,zorder=10,
+                    markeredgewidth=0.4*self.figsize,label=ptype['name'])
+
+
+            for ptype in plot_types:
+                for row in progdata:
+                    if row['type'] in ptype['type']:
+                        if row['e_log_L']==0.0: uplims=[1]
+                        else: uplims=[0]
+
+                        ax.errorbar([row['log_T']],[row['log_L']],
+                            xerr=[row['e_log_T']],yerr=[row['e_log_L']],
+                            uplims=uplims, color=ptype['color'],
+                            linewidth=0.4*self.figsize,marker=ptype['marker'],
+                            ms=2*self.figsize,zorder=5,capsize=0.5*self.figsize,
+                            markeredgecolor=black,
+                            markeredgewidth=0.4*self.figsize)
+
+            legend = ax.legend(loc='lower left',fontsize=3.2*self.figsize)
+
+        if add_yoon:
+            yoondata = self.load_yoon('data/yoon_0.02.dat')
+
+            iibflag = False ; ibflag = False
+            for row in yoondata:
+                label=None
+                color=None
+                if 'IIb' in row['SN']:
+                    if not iibflag: label='Yoon et al. 2017 IIb'
+                    color=green
+                    iibflag = True
+                elif 'Ib' in row['SN']:
+                    if not ibflag: label='Yoon et al. 2017 Ib'
+                    color=blue
+                    ibflag = True
+                else:
+                    continue
+                ax.plot(row['log_Teff'],row['log_L'],'*',
+                    ms=4*self.figsize, label=label, color=color)
+
+            legend = ax.legend(loc='upper left',fontsize=3.2*self.figsize)
+            ylim[0]=4.45
+
+        if add_lbvs:
+            ax.plot([np.log10(14000)],[5.55],'o',color=black)
+            ax.plot([np.log10(8750)], [5.51],'o',color=black)
+            ax.plot([np.log10(7900)], [5.49],'o',color=black)
+            ax.plot([np.log10(7500)], [5.45],'o',color=black)
+            ax.plot([np.log10(13800)],[5.42],'o',color=black)
+
+        xlim[0]=4.00
+        ax.set_xlim(xlim)
+        ax.set_ylim(ylim)
+
+        if add_data:
+            if limits:
+                if self.fit.model_type=='blackbody':
+                    # Easiest - Then samples represent (luminosity, temperature)
+                    # Generate a contour for the region encompassed by inf val
+                    photfile = self.fit.dirs['input']+'2020fqv.dat'
+
+                    self.fit.set_model_type('blackbody', extinction=False)
+                    self.fit.phottable = self.fit.import_phottable(photfile)
+
+                    mjd, inst_filt, mag, magerr = self.fit.get_fit_parameters(
+                        self.fit.phottable)
+
+                    # These values are hard-coded from 2020fqv - should find a
+                    # way to do this automatically
+                    ext=(1.67,3.22)
+                    self.fit.load_extinction(val=ext)
+
+                    self.fit.load_models(self.fit.phottable)
+                    self.fit.backend = self.fit.load_backend('blackbody',
+                        self.fit.phottable)
+
+                    def ccolor(r,g,b):
+                        return((r/255.,g/255.,b/255., 1.0))
+
+                    ncols=60
+                    colarray=np.array([ccolor(l,l,l) for l in
+                        np.flip(np.arange(255-ncols,255))])
+                    cm = ListedColormap(colarray)
+
+                    gsize=(400,500)
+
+                    grid=np.zeros((gsize[0], gsize[1]))
+                    lum_space = np.linspace(ylim[0], ylim[1], gsize[1])
+                    tem_space = np.linspace(xlim[0], xlim[1], gsize[0])
+                    print(ylim,xlim)
+                    for ii,temp in enumerate(tem_space):
+                        for jj,lum in enumerate(lum_space):
+                            model,Av,Rv = self.fit.compute_model_mag(inst_filt,
+                                (lum, 10**temp), extinction=ext)
+                            if any([mmag>nmag for mmag,nmag in zip(mag,model)]):
+                                grid[ii,jj]=1
+
+                    print(len(np.where(grid==0)[0]))
+                    print(len(np.where(grid==1)[0]))
+
+                    vals=np.where(grid==1)
+                    idx=np.argmin(vals[1])
+                    print(idx)
+                    print(vals[1][idx])
+                    print(tem_space[vals[0][idx]],lum_space[vals[1][idx]])
+
+                    levels = np.linspace(0, 1, ncols)
+
+                    ax.contourf(tem_space,lum_space,np.transpose(grid),cmap=cm)
+                    ax.contour(tem_space,lum_space,np.transpose(grid),
+                        linewidths=6, levels=levels, zorder=5, colors=('red'))
+
+            else:
+                data=[np.log10(2800),4.2,0.2,0.2]
+
+                if data[0]+data[2]>xlim[0]:
+                    xlim[0] = 1.045*(data[0]+data[2])
+                if data[0]-data[2]<xlim[1]:
+                    xlim[1] = 0.95*(data[0]-data[2])
+                if data[1]+data[3]>ylim[1]:
+                    ylim[1] = 1.01*(data[1]+data[3])
+                if data[1]-data[3]<ylim[0]:
+                    ylim[0] = 0.95*(data[1]-data[3])
+
+                xlim[0]=4.00
                 ax.set_ylim(ylim)
                 ax.set_xlim(xlim)
 
@@ -587,8 +860,8 @@ class sed_plot(object):
                            data[1]+0.0082*self.figsize*(ylim[1]-ylim[0])]
 
 
-        limit_Av='%.2f'%limit_Av
-        self.close_plot(f'hr-{mode}Av{limit_Av}.eps')
+        self.close_plot('cmd-'+mode+'.eps')
+
 
     def setup_plot(self, size=[1.8, 1.5]):
 
@@ -600,10 +873,8 @@ class sed_plot(object):
 
     def close_plot(self, name):
 
-        if name.endswith('.eps'):
-            name = name.replace('.eps','.png')
-        elif not name.endswith('.png'): 
-            name = name+'.png'
+        if name.endswith('.eps'): name = name.replace('.eps','.png')
+        if not name.endswith('.png'): name = name+'.png'
         print('Saving figure:',name)
 
         plt.tight_layout(pad=self.pad, w_pad=self.pad, h_pad=self.pad)
@@ -700,6 +971,14 @@ class sed_plot(object):
             self.fit.backend = self.fit.load_backend(model, self.fit.phottable)
             samples = np.array(self.fit.backend.get_chain(flat=True))
             blobs = np.array(self.fit.backend.get_blobs(flat=True))
+            prob = np.array(self.fit.backend.get_log_prob(flat=True))
+
+            mask = np.isinf(np.abs(prob))
+
+            samples = samples[~mask]
+            blobs = blobs[~mask]
+            prob = -1.0 * prob[~mask]
+            prob = prob / np.min(prob)
 
             Av_step = 0.1
             Rv_step = 0.08333333333
@@ -710,7 +989,6 @@ class sed_plot(object):
             adjust[:,0] = adjust[:,0] * 2*Rv_step
 
             blobs = blobs + adjust
-
 
             data = np.hstack([samples, blobs])
 
@@ -741,6 +1019,93 @@ class sed_plot(object):
                     hist_kwargs={'linewidth': 0.4*self.figsize},
                     labelpad=npad*self.figsize)
 
+            elif model=='rsg':
+                # Transform tau_V -> A_V
+                data[:,0] = 0.79 * data[:,0]
+                data = data[:,:4]
+
+                print(data.shape)
+
+                mask = prob < 1.0 + 4.27
+                data = data[mask]
+
+                print(data.shape)
+
+                data_range = []
+                for i in np.arange(4):
+                    data_range.append((0.95*np.min(data[:,i]),
+                        1.05*np.max(data[:,i])))
+
+                fig = corner.corner(data, bins=20,
+                    labels=(self.axis_titles['A_V'],
+                            self.axis_titles['log_L'],
+                            self.axis_titles['Teff'],
+                            self.axis_titles['Tdust']),
+                    ms=12, title_kwargs={'fontsize': 3.1*self.figsize},
+                    range=data_range,
+                    hist_kwargs={'linewidth': 0.4*self.figsize},
+                    labelpad=npad*self.figsize)
+
+                n=2
+                param_text=[]
+                for jj,param in enumerate(['A_V','log_L','Teff','Tdust']):
+                    title = self.axis_titles[param]
+                    mcmc = np.median(data[:,jj])
+                    digits = int(np.ceil(np.log10(mcmc)))
+                    decimal_place = -1 * (digits - n)
+                    if float(mcmc)==int(mcmc) and decimal_place < 1:
+                        mcmc=int(mcmc)
+                    mcmc = round(mcmc, decimal_place)
+
+                    if float(mcmc)==int(mcmc) and decimal_place < 1:
+                        mcmc = int(mcmc)
+
+                    maxval = np.percentile(data[:,jj], 84)
+                    minval = np.percentile(data[:,jj], 16)
+
+                    maxval = round(maxval-mcmc, decimal_place)
+                    minval = round(mcmc-minval, decimal_place)
+
+                    if float(minval)==int(minval) and decimal_place < 1:
+                        minval=int(minval)
+                    if float(maxval)==int(maxval) and decimal_place < 1:
+                        maxval=int(maxval)
+
+                    if param=='log_L':
+                        minval=0.4
+                        maxval=0.4
+
+                    if decimal_place>0:
+                        str_fmt = '%7.{0}f'.format(int(decimal_place))
+                        mcmc = str_fmt % mcmc
+                        maxval = str_fmt % maxval
+                        minval = str_fmt % minval
+
+                    if float(maxval)==float(minval):
+                        mcmc = str(mcmc).strip()
+                        maxval = str(maxval).strip()
+
+                        val = f'{mcmc} \\pm {maxval}'
+                        text = title+r' = $'+val+'$'
+                    else:
+                        mcmc = str(mcmc).strip()
+                        maxval = '{+'+str(maxval).strip()+'}'
+                        minval = '{-'+str(minval).strip()+'}'
+
+                        val=f'{mcmc}^{maxval}_{minval}'
+                        text = title+r' = $'+val+'$'
+
+                    param_text.append(text)
+
+                fig.text(0.72, 0.95, '\n'.join(param_text),
+                    va='top', ha='center',
+                    fontsize=3.6*self.figsize)
+
+
+            else:
+                print(f'ERROR: {model} not recognized for corner plot!')
+                return(None)
+
             fig.set_size_inches(1.5*self.figsize, 1.5*self.figsize)
             plt.tight_layout(pad=0.1*self.pad, w_pad=self.pad, h_pad=self.pad)
 
@@ -754,14 +1119,12 @@ class sed_plot(object):
 def main():
     sed = sed_plot()
 
-    photfile = sed.fit.dirs['input']+'2023ixf-ATLAS.dat'
+    photfile = sed.fit.dirs['input']+'2020jfo.dat'
     sed.load_sed('blackbody', photfile)
 
-    #sed.plot_corner(['bpass'])
-    print('Making HR figure...')
     sed.hr(mode='single', progenitors='progenitors.dat',
-            add_progenitors=True,add_yoon=False,add_lbvs=False,add_data=True,
-            add_rsg=True,limits=True, limit_Av=0.0)
+        add_progenitors=True,add_yoon=False,add_lbvs=False,add_data=True,
+        add_rsg=False,limits=False)
 
 if __name__ == "__main__":
     main()
