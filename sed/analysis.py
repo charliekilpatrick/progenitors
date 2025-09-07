@@ -28,6 +28,7 @@ import numpy as np
 import argparse
 import time
 import random
+import extinction
 
 # Dependencies from this repo
 import constants
@@ -36,6 +37,8 @@ import dust
 
 import pysynphot as S
 S.setref(area = 25.0 * 10000)
+
+import multiprocessing
 
 # List of parameters to be fit for different types of SEDs
 model_fit_params = {
@@ -46,7 +49,12 @@ model_fit_params = {
     'mist_terminal': ['mass'],
     'blackbody': ['luminosity','temperature'],
     'pickles': ['luminosity','temperature'],
-    'rsg': ['tau_V', 'luminosity','temperature','dust_temp']
+    'rsg': ['tau_V', 'luminosity','temperature','dust_temp'],
+    'rsg_sil_2': ['tau_V', 'luminosity','temperature','dust_temp'],
+    'rsg_grp_2': ['tau_V', 'luminosity','temperature','dust_temp'],
+    'rsg_sil_10': ['tau_V', 'luminosity','temperature','dust_temp'],
+    'rsg_grp_10': ['tau_V', 'luminosity','temperature','dust_temp'],
+    'grams': ['luminosity','temperature','mlr'],
 }
 
 class sed_fitter(object):
@@ -64,7 +72,12 @@ class sed_fitter(object):
         self.files = {
                 'pickles': {'input': 'pickles.dat',
                             'interp': 'interpolate/pickles.pkl'},
+                'rsg_sil_2': {'interp': 'interpolate/rsg_sil_s2.pkl'},
+                'rsg_grp_2': {'interp': 'interpolate/rsg_grp_s2.pkl'},
+                'rsg_sil_10': {'interp': 'interpolate/rsg_sil_s10.pkl'},
+                'rsg_grp_10': {'interp': 'interpolate/rsg_grp_s10.pkl'},
                 'rsg': {'interp': 'interpolate/rsg.pkl'},
+                'grams': {'interp': 'interpolate/grams.pkl'},
                 'mist': {'suffix': {'cmd': 'M.track.eep.cmd',
                                     'theoretical':'M.track.eep'}},
                 'blackbody':{'interp':'interpolate/blackbody.pkl'},
@@ -79,7 +92,8 @@ class sed_fitter(object):
             'bpass': 'data/bpass/',
             'figures': 'figures/',
             'backends': 'data/backends/',
-            'data': 'data/'
+            'data': 'data/',
+            'bcs': 'data/bcs/',
         }
 
         try:
@@ -156,10 +170,10 @@ class sed_fitter(object):
         self.host_ext_inst_filt = {}
 
         # A list of rv values for input filters
-        self.rv = []
+        self.rv = {}
 
         # Default wavelength binset in angstroms for pysynphot
-        self.waves = 3500.0 + 10.0*np.arange(9650)
+        self.waves = 10.0 + 10.0*np.arange(29650)
         self.bandpasses = None
 
         self.file_suffix = {'theoretical':'M.track.eep',
@@ -167,15 +181,17 @@ class sed_fitter(object):
 
         self.bounds = {
             'luminosity': [-1.0, 7.0],
-            'temperature': [800., 100000.],
-            'tau_V': [0.01, 6.0],
-            'dust_temp': [200., 2000.],
+            'temperature': [300., 100000.],
+            'tau_V': [0.01, 100.0],
+            'dust_temp': [500., 1500.],
             'mass': [0.1, 120.0],
             'age': [1.0e4, 13.0e9],
             'period': [0.0, 4.0], # in log10(days)
             'ratio': [0.1, 0.9],
             'Av': [0.0, 6.0],
-            'Rv': [2.0, 6.0]
+            'Rv': [2.0, 6.0],
+            'mlr': [],
+            'variance': [0, np.inf],
         }
 
         self.model_functions = {
@@ -183,6 +199,11 @@ class sed_fitter(object):
             'bpass': self.compute_bpass_mag,
             'pickles': self.compute_pickles_mag,
             'rsg': self.compute_rsg_mag,
+            'rsg_sil_2': self.compute_rsg_mag,
+            'rsg_grp_2': self.compute_rsg_mag,
+            'rsg_sil_10': self.compute_rsg_mag,
+            'rsg_grp_10': self.compute_rsg_mag,
+            'grams': self.compute_grams_mag,
         }
 
         self.load_model_functions = {
@@ -192,12 +213,22 @@ class sed_fitter(object):
             'mist_terminal': self.load_mist,
             'pickles': self.load_pickles,
             'rsg': self.load_rsg,
+            'rsg_sil_2': self.load_rsg,
+            'rsg_grp_2': self.load_rsg,
+            'rsg_sil_10': self.load_rsg,
+            'rsg_grp_10': self.load_rsg,
+            'grams': self.load_grams,
         }
 
         if self.interpolate:
             self.model_functions['blackbody']=self.get_interpolated_mag
             self.model_functions['pickles']=self.get_interpolated_mag
             self.model_functions['rsg']=self.get_interpolated_mag
+            self.model_functions['rsg_sil_2']=self.get_interpolated_mag
+            self.model_functions['rsg_grp_2']=self.get_interpolated_mag
+            self.model_functions['rsg_sil_10']=self.get_interpolated_mag
+            self.model_functions['rsg_grp_10']=self.get_interpolated_mag
+            self.model_functions['grams']=self.get_interpolated_mag
 
         # For BPASS or other models that use Vega mag units
         self.ab_to_vega = {}
@@ -211,7 +242,7 @@ class sed_fitter(object):
             help='Object name to analyze.  Must have a phot file in input dir')
         parser.add_argument('model', type=str,
             help='Type of model to fit to object '+\
-            '[blackbody|pickles|mist|bpass|rsg]')
+            '[blackbody|pickles|mist|bpass|rsg|grams]')
         parser.add_argument('--niter','-n', type=int, default=1,
             help='Number of iterations over which to perform emcee')
         parser.add_argument('--nsteps', type=int, default=500,
@@ -230,21 +261,40 @@ class sed_fitter(object):
         parser.add_argument('--notau', default=False, action='store_true',
             help='For the RSG model, set this flag to ignore tau_V and Tdust '+\
             ' parameters as part of fit.')
-        parser.add_argument('--skipdust', default=False, action='store_true',
+        parser.add_argument('--skip-dust', default=False, action='store_true',
             help='For the RSG model, set this flag to skip sampling the '+\
             'dust parameters as part of showing the output.')
         parser.add_argument('--report-mist-mass', default=False, action='store_true',
             help='For a model with a predicted luminosity, report the MIST mass'+\
             'that is consistent with the range of luminosity.')
-
-
+        parser.add_argument('--metallicity','-z', default=0.0, type=float,
+            help='Metallicity for models that depend on a metallicity estimate.')
+        parser.add_argument('--logg', default=-0.5, type=float,
+            help='Surface gravity for models that depend on a surface gravity estimate.')
+        parser.add_argument('--dust-comp', default='sil', type=str,
+            help='Composition of the dust to use in the dusty RSG model [grp|sil]')
+        parser.add_argument('--dust-width', default=2, type=int,
+            help='Width of the dust shell to use in the dusty RSG model [2|10]')
+        parser.add_argument('--magerr-floor', default=0.0, type=float,
+            help='Error floor in magnitudes to apply to all photometry.')
+        parser.add_argument('--use-variance', default=False, action='store_true',
+            help='Include a variance parameter in the model fit.')
+        parser.add_argument('--extinction-law', default='fitzpatrick99', type=str,
+            help='Extinction law to use that is passed to the extinction python package.'+\
+            'Options are [ccm89|odonnell94|calzetti00|fitzpatrick99]')
+        parser.add_argument('--bolometric-correction', default=None, type=str,
+            help='Output the bolometric correction for the best-fitting model '+\
+            'in the given inst_filt pair.')
 
         return(parser)
 
     def set_model_type(self, model_type, extinction=False, notau=False):
         self.model_type = model_type
 
-        if model_type=='rsg' and notau:
+        if 'rsg' in self.model_type:
+            self.model_type = f'rsg_{self.options.dust_comp}_{self.options.dust_width}'
+
+        if 'rsg' in model_type and notau:
             model_fit_params['rsg'] = ['luminosity','temperature']
 
         self.model_fit_params = model_fit_params[model_type]
@@ -252,13 +302,22 @@ class sed_fitter(object):
         if extinction: self.model_fit_blobs = ['Av','Rv']
 
         # Restrict the temperture range if model type is RSG
-        if model_type=='rsg':
+        if 'rsg' in self.model_type:
             self.bounds['luminosity']=[2.5,5.8]
             self.bounds['temperature']=[2600.0, 4500.0]
 
-        if model_type=='pickles':
+        # Adjust tau value for graphitic dust or dust_width==10
+        if 'rsg' in self.model_type and 'grp' in self.model_type:
+            self.bounds['tau_V'] = [0.01, 15.0]
+
+        if self.model_type=='pickles':
             self.bounds['luminosity']=[3.0,7.0]
             self.bounds['temperature']=[2500.35,40000.]
+
+        # All models should have variance parameter
+        if self.options.use_variance:
+            self.model_fit_params += ['variance']
+            self.bounds['variance']=[0.0, np.inf]
 
     # For a cumulative distribution function cdf with dimensions N, M
     # corresponding to arr1 and arr2, respectively, create a uniform random
@@ -349,51 +408,19 @@ class sed_fitter(object):
     # outputs a pysynphot spectrum with relative extinction versus wavelength
     def extinction_law(self, wave, Av, Rv, deredden=False):
 
-        # Inverse wavelength dependent quantities
-        x=1./(wave*1.0e-4)
-        y=x-1.82
+        a_wave = None
+        if self.options.extinction_law=='ccm89':
+            a_wave = extinction.ccm89(wave, Av, Rv)
+        elif self.options.extinction_law=='odonnell94':
+            a_wave = extinction.odonnell94(wave, Av, Rv)
+        elif self.options.extinction_law=='calzetti00':
+            a_wave = extinction.calzetti00(wave, Av, Rv)
+        elif self.options.extinction_law=='fitzpatrick99':
+            a_wave = extinction.fitzpatrick99(wave, Av, Rv)
+        else:
+            raise Exception(f'ERROR: {self.options.extinction_law} not supported.')
 
-        # Variables proportional to extinction
-        a=np.zeros(len(wave))
-        b=np.zeros(len(wave))
-        Fa=np.zeros(len(wave))
-        Fb=np.zeros(len(wave))
-
-        # Masks to apply piecewise Cardelli et al. function
-        mask1 = np.where(x < 1.1)
-        mask2 = np.where((x > 1.1) & (x < 3.3))
-        mask3 = np.where(x > 3.3)
-        mask4 = np.where(x > 5.9)
-
-        x=1./(wave[mask1]*1.0e-4)
-        y=x-1.82
-
-        a[mask1]=0.574 * x**1.61
-        b[mask1]=-0.527 * x**1.61
-
-        x=1./(wave[mask2]*1.0e-4)
-        y=x-1.82
-
-        a[mask2]=1 + 0.17699 * y - 0.50447 * y**2 - 0.02427 * y**3 +\
-            0.72085 * y**4 + 0.01979*y**5 - 0.77530*y**6 + 0.32999*y**7
-        b[mask2]=1.41338 * y + 2.28305 * y**2 + 1.07233 * y**3 -\
-            5.38434 * y**4 - 0.62251 * y**5 + 5.30260 * y**6 - 2.09002 * y**7
-
-        x=1./(wave[mask4]*1.0e-4)
-        y=x-1.82
-
-        Fa[mask4]=-0.04473 * (x-5.9)**2 - 0.009779 * (x-5.9)**3
-        Fb[mask4]=0.2130 * (x-5.9)**2 + 0.1207 * (x-5.9)**3
-
-        x=1./(wave[mask3]*1.0e-4)
-        y=x-1.82
-
-        a[mask3]=1.752 - 0.316 * x - 0.104/((x-4.67)**2 + 0.341) + Fa[mask3]
-        b[mask3]=-3.090 + 1.825 * x + 1.206/((x-4.62)**2 + 0.263) + Fb[mask3]
-
-        Alam = Av*(a+b/Rv)
-        elam = 10**(-0.4 * Alam)
-        if deredden: elam = 1./elam
+        elam = 10**(-0.4 * a_wave)
 
         sp = S.ArraySpectrum(wave, elam, fluxunits='count')
 
@@ -433,13 +460,6 @@ class sed_fitter(object):
             sfd = utilities.get_sfd()
             self.mw_ebv = sfd(self.coord)
 
-        # Set mag system if it is in photometry table.  AB mag is preferred
-        if 'magsystem' in table.meta.keys():
-            system = table.meta['magsystem']
-            if 'ab' in system.lower(): self.magsystem = 'abmag'
-            if 'vega' in system.lower(): self.magsystem = 'vegamag'
-            if 'st' in system.lower(): self.magsystem = 'stmag'
-
         if 'distance' in table.meta.keys():
             self.distance[0] = float(table.meta['distance'])
             self.dm = 5 * np.log10(self.distance[0]) + 25.0
@@ -459,6 +479,19 @@ class sed_fitter(object):
                 if val in self.phottable.keys():
                     self.phottable.rename_column(val, key)
 
+        # Set mag system if it is in photometry table.  AB mag is preferred
+        if 'magsystem' in table.keys():
+            mask = np.array(['vega' in s.lower() for s in table['magsystem']])
+            for i,row in enumerate(table):
+                if not mask[i]: continue
+                inst_filt = self.get_inst_filt(row)
+                bp = self.inst_filt_to_bandpass(inst_filt)
+                if bp.name not in self.ab_to_vega.keys():
+                    self.ab_to_vega[bp.name] = self.get_ab_to_vega(bp)
+                conv = self.ab_to_vega[bp.name]
+                mag = self.phottable['magnitude'][i]
+                self.phottable['magnitude'][i]=mag-conv
+
         # Check if we need to convert magnitudes to Vega mag
         if self.model_type=='bpass' and self.magsystem=='abmag':
             # Convert to Vega
@@ -476,35 +509,42 @@ class sed_fitter(object):
         if any([float(e)==0.0 for e in error]):
             self.limits = True
 
+        # Apply error floor to non 0.0 magerr values
+        if self.options and self.options.magerr_floor>0.0:
+            err_floor = self.options.magerr_floor
+            for i,row in self.phottable:
+                magerr=row['mag_err']
+                if magerr>0.0:
+                    self.phottable['mag_err'][i] = np.sqrt(magerr**2+err_floor**2)
+
         # Set waveset depending on whether we're fitting Spitzer data
-        wavemax = 2.5e4
+        wavemax = 2.5e5
         inst = list(self.phottable['instrument'].data)
         if any(['spitzer' in i.lower() for i in inst]): wavemax = 1.5e5
         S.setref(waveset=(100, wavemax, 50000, 'log'))
 
         # Sort table and get list of Rv values to apply for MW extinction
         self.phottable.sort('filter')
-        newdict={}
-        for key in constants.sf11rv.keys():
-            newdict[key.upper()]=constants.sf11rv[key]
-        constants.sf11rv.update(newdict)
 
-        remove_rows=[]
-        for i,row in enumerate(self.phottable):
-            inst_filt = self.get_inst_filt(row)
-            filt = inst_filt.split('_')[-1]
-            if filt in constants.sf11rv.keys():
-                self.rv.append(constants.sf11rv[filt])
-            elif inst_filt in constants.sf11rv.keys():
-                self.rv.append(constants.sf11rv[inst_filt])
-            else:
-                print(f'WARNING: {inst_filt} and {filt} not in '+\
-                    'extinction coefficient constants!  Update contants.py!')
-                print(f'Removing: {inst_filt}')
-                remove_rows.append(i)
+        inst_filts = [self.get_inst_filt(row) for row in self.phottable]
+        if self.options.bolometric_correction:
+            if self.options.bolometric_correction not in inst_filts:
+                inst_filts.append(self.options.bolometric_correction)
 
-        self.phottable.remove_rows(remove_rows)
+        for inst_filt in inst_filts:
+            if inst_filt in self.rv.keys(): continue
 
+            bp = self.inst_filt_to_bandpass(inst_filt)
+
+            R_filts = []
+            Rv = np.linspace(2.0, 6.0, 20)
+            for R in Rv:
+                R_filts.append(self.calculate_extinction(R, R, bp))
+
+            R_func = interpolate.interp1d(Rv, R_filts)
+            self.rv[inst_filt] = R_func
+
+            print(f'Got R_filter for {inst_filt}')
 
         return(self.phottable)
 
@@ -538,7 +578,7 @@ class sed_fitter(object):
             for key in models.keys():
                 if key in inst_filt:
                     if self.verbose:
-                        print('Removing',key,'already in model file')
+                        print(key,'already in model file')
                     inst_filt.remove(key)
             # Exit if we have all models
             if not inst_filt:
@@ -651,7 +691,7 @@ class sed_fitter(object):
                 for key in models.keys():
                     if key in inst_filt:
                         if self.verbose:
-                            print('Removing',key,'already in model file')
+                            print(key,'already in model file')
                         inst_filt.remove(key)
                 # Exit if we have all models
                 if not inst_filt:
@@ -694,7 +734,7 @@ class sed_fitter(object):
             # Calculate magnitudes for a range of luminosity, tau_V, and dust
             # temperatures
             #nLval = 4 ; nTdval = 4 ; ntau_Vval = 4 ; nTval = 4
-            nLval = 26 ; nTdval = 12 ; ntau_Vval = 12 ; nTval = 20
+            nLval = 26 ; nTdval = 12 ; ntau_Vval = 16 ; nTval = 20
             Lval = np.linspace(self.bounds['luminosity'][0],
                 self.bounds['luminosity'][1], nLval)
             Tdval = 10**np.linspace(np.log10(self.bounds['dust_temp'][0]), 
@@ -703,6 +743,8 @@ class sed_fitter(object):
                 np.log10(self.bounds['tau_V'][1]), ntau_Vval)
             Tval = np.linspace(self.bounds['temperature'][0],
                 self.bounds['temperature'][1], nTval)
+            variance_val = np.linspace(self.bounds['variance'][0],
+                3.0)
 
             if self.verbose:
                 print('Bounds:')
@@ -718,10 +760,14 @@ class sed_fitter(object):
             inst_filt = [self.get_inst_filt(row) for row in phottable]
             # Get unique inst_filt values
             inst_filt = list(np.unique(inst_filt))
+            if self.options.bolometric_correction:
+                if self.options.bolometric_correction not in inst_filt:
+                    inst_filt.append(self.options.bolometric_correction)
             remove_keys = []
             models = None
 
-            pfile = self.dirs['data']+self.files['rsg']['interp']
+            # Handle specific models
+            pfile = os.path.join(self.dirs['data'], self.files[self.model_type]['interp'])
             models = {}
             if os.path.exists(pfile):
                 models = pickle.load(open(pfile, 'rb'))
@@ -732,6 +778,9 @@ class sed_fitter(object):
                 # Exit if we have all models
                 if not inst_filt:
                     return(models)
+
+            inst_filt_str = ' '.join(inst_filt)
+            print(f'Need to generate models for {inst_filt_str}')
 
             # Create models for the ones that don't already exist
             mags = {}
@@ -767,6 +816,9 @@ class sed_fitter(object):
             pickle.dump(models, open(pfile, 'wb'))
 
             return(models)
+
+    def load_grams(self, phottable, **kwargs):
+        pass
 
     def get_jwst_filters(self, filtnam):
 
@@ -855,6 +907,8 @@ class sed_fitter(object):
                 filename = 'GEMINI.NIRI.'+filt.upper()+'.dat'
             elif ('mayall' in inst and 'newfirm' in inst):
                 filename = 'MAYALL.NEWFIRM.'+filt.upper()+'.dat'
+            elif ('vista' in inst and 'vircam' in inst):
+                filename = 'VISTA.VIRCAM.'+filt.upper()+'.dat'
             else:
                 raise Exception(f'ERROR {inst} not recognized!')
 
@@ -960,16 +1014,27 @@ class sed_fitter(object):
 
     def get_interpolated_mag(self, inst_filt, *args):
         if self.model_type=='pickles' or self.model_type=='blackbody':
-            lum, temp = args
+            if self.options.use_variance:
+                lum, temp, _ = args
+            else:
+                lum, temp = args
             mags = np.array([self.models[i](lum, np.log10(temp)).item()
                 for i in inst_filt])
-        elif self.model_type=='rsg':
-            if len(args)==2:
-                L, Teff = args
-                tau_V = 0.01
-                Td = 200.
+        elif 'rsg' in self.model_type:
+            if self.options.use_variance:
+                if self.options.notau:
+                    L, Teff, _ = args
+                    tau_V = 0.01
+                    Td = 200.
+                else:
+                    tau_V, L, Teff, Td, _ = args
             else:
-                tau_V, L, Teff, Td = args
+                if self.options.notau:
+                    L, Teff = args
+                    tau_V = 0.01
+                    Td = 200.
+                else:
+                    tau_V, L, Teff, Td = args
             scaled_L = 10**L
             mags = np.array([self.models[i]((tau_V, scaled_L,
                 Teff, Td)).item() for i in inst_filt])
@@ -991,6 +1056,16 @@ class sed_fitter(object):
         scaled_lum = 10**lum
         spec = dust.get_ext_bb((tau_V, scaled_lum, temp, dust_temp),
             sptype=sptype)
+
+        return(spec)
+
+    def create_rsg_new(self, tau_V, lum, temp, dust_temp, sptype='all',
+        dust_model='sil', dust_width='2'):
+        # RSG model takes luminosity in Lsol as input
+        scaled_lum = 10**lum
+        spec = dust.get_new_rsg((tau_V, scaled_lum, temp, dust_temp), 
+            dust_model=dust_model,
+            rsg_model=dust_width)
 
         return(spec)
 
@@ -1020,6 +1095,9 @@ class sed_fitter(object):
         mags = self.compute_pysynphot_mag(sp, bandpasses)
 
         return(mags)
+
+    def compute_grams_mag(self, inst_filt, tau_V, lum, temp, dust_temp):
+        pass
 
     def load_mist(self, phottable, mist_type='full', feh=0.0, rotation=False,
         use_inst=None, return_models=False):
@@ -1359,10 +1437,10 @@ class sed_fitter(object):
         guess = None
         if self.model_type=='mist_terminal': guess = np.array([30.0])
         elif self.model_type=='mist': guess = np.array([1.0e7, 30.0])
-        elif self.model_type=='blackbody': guess = np.array([0.1, 5700.])
+        elif self.model_type=='blackbody': guess = np.array([5.0, 700.])
         elif self.model_type=='pickles': guess = np.array([5.077, 6353.])
         elif self.model_type=='bpass': guess = np.array([19.0, 0.1, 0.6])
-        elif self.model_type=='rsg':
+        elif 'rsg' in self.model_type:
             if self.options.notau:
                 guess = np.array([3.8, 3200])
             else:
@@ -1371,6 +1449,11 @@ class sed_fitter(object):
             error = 'ERROR: unrecognized model type.  Exiting...'
             print(error)
             sys.exit()
+
+        if guess_type!='blobs' and self.options.use_variance:
+            guess = list(guess)
+            guess.append(0.1)
+            guess = np.array(guess)
 
         return(guess)
 
@@ -1392,8 +1475,8 @@ class sed_fitter(object):
             objname = objname.replace('.txt','')
             objname = objname.replace('.dat','')
             objname = objname.replace('.cat','')
-            objname = objname.split('_')[0]
-            objname = objname.split('-')[0]
+            #objname = objname.split('_')[0]
+            #objname = objname.split('-')[0]
 
         # Create a name from inst_filt, mag, magerr for comparison to backend
         mjd, inst_filt, mag, magerr = self.get_fit_parameters(phottable)
@@ -1413,7 +1496,7 @@ class sed_fitter(object):
             if c in '1234567890': newname+=c
         newname = str(int(newname)%100207100213100237100267)
 
-        if self.model_type=='rsg' and notau:
+        if 'rsg' in self.model_type and notau:
             backfile = self.dirs['backends']+objname+'_rsg_notau.h5'
         else:
             backfile = self.dirs['backends']+objname+'_'+self.model_type+'.h5'
@@ -1436,7 +1519,8 @@ class sed_fitter(object):
             params = params[~mask,:]
 
         prob = -1.0 * prob[~mask]
-        prob = prob / np.min(prob)
+        prob = prob - np.min(prob) + 1.0
+        #prob = prob / np.min(prob)
 
         # 1-sigma (0.6827 CL) is min chi^2 + 1.00 (1 param), 2.30 (2 param),
         # 3.50 (3 param), 4.72 (4 param), 5.89 (5 param), 7.04 (6 param)
@@ -1506,7 +1590,8 @@ class sed_fitter(object):
             minval = minval + logL_unc
             maxval = maxval + logL_unc
 
-        if np.log10(mcmc)<-3:
+
+        if mcmc<1 and np.log10(mcmc)<-3:
             str_fmt = '%.3e'
             mcmc = str_fmt % mcmc
             maxval = str_fmt % maxval
@@ -1523,6 +1608,72 @@ class sed_fitter(object):
             return(float(maxval), float(minval))
         else:
             return(best)
+
+    def get_bolometric_correction(self, model_type, params, prob, ndim, inst_filt,
+        decimal_place=3):
+
+        params_sample, prob_sample = self.sample_params(params, prob, ndim,
+            nsamples=self.nsamples)
+
+        lidx = np.array(['lum' in par for par in self.model_fit_params])
+        tidx = np.array(['temperature' in par for par in self.model_fit_params])
+
+        lum = 10**params_sample[:,lidx]
+
+        # Get the bolometric magnitude from the luminosity in Lsol
+        bolmag = -2.5*np.log10(lum) + 4.74
+
+        # Apply distance modulus since model mags will be distance corrected
+        bolmag = bolmag + self.dm
+
+        # Now get magnitude in input bandpass from the chosen model
+        extinction=self.host_ext
+
+        mags = []
+        bar = progressbar.ProgressBar(max_value=len(params_sample))
+        bar.start()
+        for i,s in enumerate(params_sample):
+            bar.update(i)
+            model_mag, Av, Rv = self.compute_model_mag(np.array([inst_filt]), s,
+                extinction=extinction)
+            mags.append(model_mag)
+        bar.finish()
+
+        mags = np.array(mags)
+        bcs = bolmag - mags
+
+        best = np.percentile(bcs, 50)
+        minval = np.percentile(bcs, 16)
+        maxval = np.percentile(bcs, 84)
+
+        best = round(best, decimal_place)
+
+        maxval = maxval-best
+        minval = best-minval
+
+        minval = round(minval, decimal_place)
+        maxval = round(maxval, decimal_place)
+
+        print(f'Bolometric correction to {inst_filt} is {best} + {maxval} - {minval}')
+
+        # Formart objname from input filename
+        objname = ''
+        phottable = self.phottable
+        if 'name' in phottable.meta.keys():
+            objname = phottable.meta['name']
+        else:
+            objname = self.filename
+            if '/' in objname: objname = os.path.split(objname)[1]
+            objname = objname.replace('.txt','')
+            objname = objname.replace('.dat','')
+            objname = objname.replace('.cat','')
+
+        bc_file = os.path.join(self.dirs['bcs'], f'{objname}_{inst_filt}_BC.dat')
+        with open(bc_file, 'w') as f:
+            for val in bcs:
+                if isinstance(val, list): val=val[0]
+                elif isinstance(val, np.ndarray): val=val[0]
+                f.write(f'{val} \n')
 
     def run_emcee(self, phottable, sigma=1.0, nsteps=5000, nwalkers=100,
         guess_type='params'):
@@ -1649,7 +1800,7 @@ class sed_fitter(object):
             r=self.calculate_param_best_fit(radius, prob, ndim, 'radius')
 
         # Calculate dust parameters from model params
-        if (model_type=='rsg' and not self.options.skipdust and self.verbose
+        if ('rsg' in model_type and not self.options.skip_dust and self.verbose
             and not self.options.notau):
             print('\n\n')
             print('RSG dust parameters:')
@@ -1704,6 +1855,10 @@ class sed_fitter(object):
             r=self.calculate_param_best_fit(mlr, prob_sample, ndim,
                 'mass-loss rate', sampled=True)
 
+        if self.options.bolometric_correction:
+            self.get_bolometric_correction(model_type, sample, prob, ndim, 
+                self.options.bolometric_correction)
+
         if self.verbose: print('\n\n')
 
         if not blobs and self.host_ext:
@@ -1747,9 +1902,9 @@ class sed_fitter(object):
             if self.extinction_model:
                 model_mag[i] += self.extinction['function'][val](Rv, Av)
             elif self.host_ext:
-                model_mag[i] += self.host_ext_inst_filt[val]
+                model_mag[i] += self.rv[val](Rv) * Av/Rv
 
-            model_mag[i] += self.rv[i] * self.mw_ebv
+            model_mag[i] += self.rv[val](3.1) * self.mw_ebv
 
         # Output model magnitudes and extinction values as blobs
         return(model_mag, Av, Rv)
@@ -1786,6 +1941,7 @@ class sed_fitter(object):
             mag = mag[~limmask]
             magerr = magerr[~limmask]
             model_mag = model_mag[~limmask]
+            inst_filt = inst_filt[~limmask]
 
             # If all of the limits have passed check and there are no data
             # left, then we are in limit mode, so just return 1.0
@@ -1795,9 +1951,19 @@ class sed_fitter(object):
 
         chi2 = 1.0
         if self.extinction['likelihood']:
-            chi2 *= self.extinction['interpolation'](Av, Rv)
+            chi_scale = self.extinction['interpolation'](Av, Rv)
+        else:
+            chi_scale = 1.0
 
-        chi2 *= np.sum((mag-model_mag)**2/magerr**2)
+        if self.options.use_variance:
+            chi2 = 0.0
+            for i in np.arange(len(mag)):
+                chi2 += 0.5 * ((mag[i]-model_mag[i])**2 / (magerr[i]**2 + theta[-1]**2))
+                chi2 += 0.5 * np.log(2*np.pi * (magerr[i]**2 + theta[-1]**2))
+        else:
+            chi2 = 0.5 * np.sum((mag-model_mag)**2 / magerr**2)
+
+        chi2 = chi2 * chi_scale
 
         return(-1.0*chi2, Av, Rv)
 
@@ -1898,23 +2064,43 @@ class sed_fitter(object):
         # format output for each observation
 
         print('Model fit by observation:')
-        fmt = '{mjd:<14} {inst:<20} {mag:<8} {err:<7} {model:<9} {chi:>10}'
+        fmt = '{mjd:<14} {inst:<20} {mag:<8} {err:<7} {model:<9} {lik:>10} {cum_lik:>10} {chi:>10} {cum_chi:>10}'
         print(fmt.format(mjd='MJD', inst='INST_FILT',mag='MAG',err='MAGERR',
-            model='MODEL',chi='CHI2'))
+            model='MODEL',lik='LIKELY',cum_lik='CUM LIKELY', 
+            chi='CHI2', cum_chi='CUM CHI2'))
+        running_likelihood=0.0
+        running_chi=0.0
         for val in zip(inst_filt, mag, magerr, model, mjd):
             if float(val[2])!=0.0:
-                chi=((val[1]-val[3])**2/val[2]**2)
+                if self.options.use_variance:
+                    lik=0.5*((val[1]-val[3])**2/(val[2]**2 + theta[-1]**2))
+                    lik+=0.5 * np.log(2*np.pi * (val[2]**2 + theta[-1]**2))
+                else:
+                    lik=((val[1]-val[3])**2/(val[2]**2))
+
+                chi = ((val[1]-val[3])**2/(val[2]**2))
+                
+                running_likelihood += lik 
+                running_chi += chi
+
+                if lik>1.0e5:
+                    lik='{:4e}'.format(lik)
+                else:
+                    lik='%.4f'%lik
+
                 if chi>1.0e5:
                     chi='{:4e}'.format(chi)
                 else:
-                    chi='%5.4f'%chi
+                    chi='%.4f'%chi
+
             elif val[3] < val[1]:
                 chi='inf'
             else:
                 chi='nan'
             print(fmt.format(mjd=val[4], inst=val[0], mag='%2.4f'%float(val[1]),
                 err='%.4f'%float(val[2]), model='%2.4f'%float(val[3]),
-                chi=chi))
+                lik=lik, cum_lik='%.4f'%running_likelihood,
+                chi=chi, cum_chi='%.4f'%running_chi))
 
         if self.extinction['likelihood']:
             value = self.extinction['interpolation'](Av, Rv).item()
@@ -1923,9 +2109,9 @@ class sed_fitter(object):
         if np.isinf(chi2):
             print('Sum chi^2 for best: inf')
         elif isinstance(chi2, float):
-            print('Sum chi^2 for best: {0}'.format('%.7f'%chi2))
+            print('Sum chi^2 for best: {0}'.format('%.4f'%(-1.0*chi2)))
         else:
-            print('Sum chi^2 for best: {0}'.format('%.7f'%(-1.0*chi2.item())))
+            print('Sum chi^2 for best: {0}'.format('%.4f'%(-1.0*chi2.item())))
 
     def get_wavelength_widths(self, spectrum, bandpasses):
 
@@ -2000,7 +2186,6 @@ def main():
         # This can be done with input E(B-V) and Rv values for the host or by
         # calculating a grid of extinction values for the input model parameters
         sed.load_extinction()
-        #sed.calculate_extinction_grid(inst_filt)
         sed.load_models(sed.phottable)
 
         # Check if there is a backend for the current photometry table and model

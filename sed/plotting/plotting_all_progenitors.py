@@ -461,7 +461,7 @@ class sed_plot(object):
                             markeredgecolor=black,
                             markeredgewidth=0.4*self.figsize)
 
-            legend = ax.legend(loc='lower left',fontsize=3.2*self.figsize)
+            legend = ax.legend(loc='lower left',fontsize=4.4*self.figsize)
 
         if add_yoon:
             yoondata = self.load_yoon('data/yoon_0.02.dat')
@@ -863,11 +863,11 @@ class sed_plot(object):
         self.close_plot('cmd-'+mode+'.eps')
 
 
-    def setup_plot(self, size=[1.8, 1.5]):
+    def setup_plot(self, size=[2.8, 1.5]):
 
         fig, ax = plt.subplots()
         for i in ax.spines.keys(): ax.spines[i].set_linewidth(0.6*self.figsize)
-        fig.set_size_inches(2.0*self.figsize, 1.6*self.figsize)
+        fig.set_size_inches(size[0]*self.figsize, size[1]*self.figsize)
 
         return(fig, ax)
 

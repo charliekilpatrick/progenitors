@@ -4,6 +4,7 @@ from scipy import interpolate
 from scipy.integrate import simps
 import pysynphot as S
 import sys
+import pickle
 
 dustdir = 'data/dust/'
 
@@ -252,4 +253,22 @@ def get_rv(p, rsg_model='10', dust_model='g2'):
     a_dust = get_dust(w, p[0], model=dust_model)
     obsflux = flux * 10**(-0.4*a_dust)
     bb_scale = simps(flux-obsflux, w)
+
+def get_new_rsg(p, rsg_model='2', dust_model='sil'):
+
+
+    tau = p[0]
+    lum = p[1]
+    teff = p[2]
+    tdust = p[3]
+
+    file = f'data/interpolate/rsg_{dust_model}_s{rsg_model}_fullgrid.pkl'
+    models = pickle.load(open(file, 'rb'))
+
+    wavelengths = np.linspace(2000, 100000, 5000)
+    flux = models((wavelengths, tau, lum, teff, tdust))
+
+    sp = S.ArraySpectrum(wavelengths, flux, waveunits='angstrom', fluxunits='flam')
+
+    return(sp)
 

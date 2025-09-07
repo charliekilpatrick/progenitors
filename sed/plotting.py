@@ -70,6 +70,7 @@ class sed_plot(object):
             'initial_mass': r'$M/M_{\odot}$',
             'period': r'$\log(P/\mathrm{1 day})$',
             'mass_ratio': 'q',
+            'variance': r'$\sigma_{\rm sys}$'
         }
 
         self.plot_types = {
@@ -90,16 +91,32 @@ class sed_plot(object):
         parser.add_argument('objname', type=str,
             help='Object name to analyze.  Must have a phot file in input dir')
         parser.add_argument('type', type=str,
-            help='Types of models to show, can be comma-separated to show '+\
-            'multiple models [blackbody|pickles|mist|bpass|rsg]')
-        parser.add_argument('model', type=str,
             help='Types of plot to make, can be comma-separated to make '+\
             'multiple plots [hr|sed|cmd|corner|lightcurve]')
+        parser.add_argument('model', type=str,
+            help='Types of models to show, can be comma-separated to show '+\
+            'multiple models [blackbody|pickles|mist|bpass|rsg]')
         parser.add_argument('--notau', default=False, action='store_true',
             help='For the RSG model, set this flag to ignore tau_V and Tdust '+\
             ' parameters as part of fit.')
         parser.add_argument('--simple-rsg', default=False, action='store_true',
             help='Do not add additional SEDs for the RSG model plot.')
+        parser.add_argument('--dust-comp', default='sil', type=str,
+            help='Composition of the dust to use in the dusty RSG model [grp|sil]')
+        parser.add_argument('--dust-width', default=2, type=int,
+            help='Width of the dust shell to use in the dusty RSG model [2|10]')
+        parser.add_argument('--magerr-floor', default=0.0, type=float,
+            help='Error floor in magnitudes to apply to all photometry.')
+        parser.add_argument('--use-variance', default=False, action='store_true',
+            help='Include a variance parameter in the model fit.')
+        parser.add_argument('--extinction-law', default='fitzpatrick99', type=str,
+            help='Extinction law to use that is passed to the extinction python package.'+\
+            'Options are [ccm89|odonnell94|calzetti00|fitzpatrick99]')
+        parser.add_argument('--plot-title', default=None, type=str,
+            help='If provided, add a title to the plot.')
+        parser.add_argument('--bolometric-correction', default=None, type=str,
+            help='Output the bolometric correction for the best-fitting model '+\
+            'in the given inst_filt pair.')
 
         return(parser)
 
@@ -128,12 +145,16 @@ class sed_plot(object):
 
         # Calculate a grid of extinction values for the input model parameters
         if extinction: self.fit.calculate_extinction_grid(inst_filt)
+        print('Load models')
         self.fit.load_models(self.fit.phottable)
 
         # Check if there is a backend for the current photometry table and model
         # and import or make one if there's not a current one
+        print('Load backend')
         self.fit.backend = self.fit.load_backend(model, self.fit.phottable,
             notau=notau)
+
+        print('Done')
 
     def convert_to_fluxspace(self, spectrum, ext):
 
@@ -183,21 +204,38 @@ class sed_plot(object):
         fig, ax = self.setup_plot()
         self.setup_ticks(ax)
 
+        max_flux = []
+
         for i,model in enumerate(models):
 
             print('Plotting model:',model)
-            self.load_sed(model, self.fit.filename, extinction=extinction,
-                notau=notau)
+            if 'rsg' in model:
+                _, dust_comp, dust_width = model.split('_')
+                self.fit.options.dust_comp = dust_comp
+                self.fit.options.dust_width = dust_width
 
+                self.load_sed('rsg', self.fit.filename, extinction=extinction,
+                    notau=notau)
+            else:
+                self.load_sed(model, self.fit.filename, extinction=extinction,
+                    notau=notau)
+
+            print('Loading backend')
             self.fit.backend = self.fit.load_backend(model, self.fit.phottable,
                 notau=notau)
 
-            params = self.fit.get_guess(model, guess_type='params')
+            try:
+                print('Getting parameter guess')
+                params = self.fit.get_guess(model, guess_type='params')
+            except:
+                print('ERROR: could not get params from backend.')
+                print('Run analysis.py first.')
+                sys.exit(-1)
             ext = self.fit.get_guess(model, guess_type='blobs')
 
             sp = None
             if model=='blackbody':
-                sp = self.fit.create_blackbody(*params)
+                sp = self.fit.create_blackbody(*params[:-1])
                 plottemp = ''
                 title=str(int(np.round(params[1], decimals=-1)))+' K blackbody'
                 sp.convert('flam')
@@ -208,16 +246,23 @@ class sed_plot(object):
                 title = title.replace('V','I')
                 sp.convert('flam')
                 sp = S.ArraySpectrum(sp.wave, sp.flux/1.086)
-            elif model=='rsg':
+            elif 'rsg' in model:
+                _, dust_comp, dust_width = model.split('_')
                 if len(params)==2:
                     title = 'RSG'
                     params = [0.01,params[0],params[1],200.]
                 else:
-                    label = 'Reddened RSG +\n {0} K dust'
-                    dust_temp = int(truncate(params[3],-1))
-                    title = label.format(dust_temp)
 
-                sp = self.fit.create_rsg(*params)
+                    if 'sil' in dust_comp:
+                        comp_str = 'silicate'
+                    elif 'grp' in dust_comp:
+                        comp_str = 'graphitic'
+
+                    dust_temp = int(truncate(params[3],-1))
+                    title = f'Reddened RSG +\n {dust_temp} K {comp_str} dust'
+
+                sp = self.fit.create_rsg_new(*params,
+                    dust_model=dust_comp, dust_width=dust_width)
 
             if fluxspace: sp = self.convert_to_fluxspace(sp, ext)
 
@@ -256,13 +301,13 @@ class sed_plot(object):
                 bbsflux = sp.flux 
 
                 idx = np.argsort(bbwave)
-                bbwave = np.flip(bbwave[idx])
-                bbsflux = np.flip(bbsflux[idx])
+                bbwave = bbwave[idx]
+                bbsflux = bbsflux[idx]
 
-                bbflux = integrate.simps(bbwave, bbsflux)
+                bbflux = np.abs(integrate.simps(bbwave, bbsflux))
 
                 distcm = self.fit.distance[0]*3.086e+24
-                lum = 4*np.pi*(distcm)**2*bbflux
+                lum = np.abs(4*np.pi*(distcm)**2*bbflux)
 
                 print('\n\nBLACKBODY MODEL VALIDATION\n'+'#'*80+'\n')
                 print('temperature [K]:',str(int(np.round(params[1], decimals=-1))))
@@ -275,34 +320,30 @@ class sed_plot(object):
 
             ax.plot(sp.wave, sp.flux, label=title, zorder=1,
                 color=palette[i+2], linewidth=0.6*self.figsize)
+            max_flux.extend(list(sp.flux))
 
-            if model=='rsg' and not kwargs['simple_rsg']:
+            if 'rsg' in model and not kwargs['simple_rsg']:
                 if len(params)==2:
                     params = [0.01,params[0],params[1],200.]
                 else:
                     dust_temp = int(truncate(params[3],-2))
 
-                sp1 = self.fit.create_rsg(*params, sptype='star')
-                sp2 = self.fit.create_rsg(*params, sptype='dust')
-                sp3 = self.fit.create_rsg(*params, sptype='intrinsic')
-
-                if fluxspace: sp1 = self.convert_to_fluxspace(sp1, ext)
-                if fluxspace: sp2 = self.convert_to_fluxspace(sp2, ext)
-                if fluxspace: sp3 = self.convert_to_fluxspace(sp3, ext)
-
-                ax.plot(sp1.wave, sp1.flux, label='Reddened RSG', zorder=2,
-                    color='blue', linewidth=0.6*self.figsize)
+                if self.options.use_variance:
+                    sparams = params[:-1]
 
                 dust_label = '{0} K dust'
                 dust_temp = int(truncate(params[3],-1))
                 dust_label = dust_label.format(dust_temp)
-                ax.plot(sp2.wave, sp2.flux, label=dust_label, zorder=1,
-                    color='red', linewidth=0.6*self.figsize)
 
-                ax.plot(sp3.wave, sp3.flux, label='Unreddened RSG', zorder=0,
-                    color='plum', linewidth=0.6*self.figsize)
+                for f,ef in zip(flux,fluxerr):
+                    max_flux.append(f+ef)
 
-        ylim = [0.5*np.min(flux-fluxerr), 1.2*np.max(flux+fluxerr)]
+        if len(max_flux)>0:
+            ylim = [0.5*np.min(flux-fluxerr), 1.2*np.max(max_flux)]
+        else:
+            bottom, top = ax.get_ylim()
+            ylim = [0.5*np.min(flux-fluxerr), top]
+
         xlim = [0.7*np.min(wave-width), 1.2*np.max(wave+width)]
         ax.set_yscale('log')
         ax.set_ylim(ylim)
@@ -345,13 +386,29 @@ class sed_plot(object):
         if xlim[1] > 3.0e4:
             if xlim[1]>1.0e5: xlim[1]=1.0e5
             ax.set_xlim(xlim)
-            ax.set_xscale('log')
+            #ax.set_xscale('log')
 
             ax.set_xlabel('Observer-frame Wavelength ('+r'$\mu$m'+')')
-            ax.set_xticks([3000,10000,30000])
-            ax.set_xticklabels(['0.3','1.0','3.0'])
+            scale = ax.get_xscale()
+            if scale=='log':
+                ax.set_xticks([3000,10000,30000])
+                ax.set_xticklabels(['0.3','1.0','3.0'])
+            elif scale=='linear':
+                ax.set_xticks([20000,40000,60000,80000,100000])
+                ax.set_xticklabels(['2','4','6','8','10'])
+
+        ax.set_ylim([2.233883452491979e-20, 1.4320648435852535e-18])
+        ax.set_xlim([1755.0044268217223, 100000.0])
 
         legend = ax.legend(loc='best', fontsize=3.6*self.figsize)
+
+        if self.options.plot_title:
+            ax.set_title(self.options.plot_title)
+        else:
+            ax.set_title(r"$R_{\rm out}/R_{\rm in}$=10")
+
+        print(ax.get_ylim())
+        print(ax.get_xlim())
 
         # Outfile
         outfile = self.options.objname.strip() + '_sed.eps'
@@ -1179,20 +1236,30 @@ class sed_plot(object):
                     hist_kwargs={'linewidth': 0.4*self.figsize},
                     labelpad=npad*self.figsize)
 
-            elif model=='rsg':
+            elif 'rsg' in model:
                 # Transform tau_V -> A_V
                 data[:,0] = 0.79 * data[:,0]
 
                 data_range = []
-                for i in np.arange(4):
+                ndim = 4
+                if self.options.use_variance: ndim = 5
+                for i in np.arange(ndim):
                     data_range.append((0.95*np.min(data[:,i]),
                         1.05*np.max(data[:,i])))
 
-                fig = corner.corner(data, bins=20,
-                    labels=(self.axis_titles['A_V'],
+                print(data_range)
+
+
+                labels = [self.axis_titles['A_V'],
                             self.axis_titles['log_L'],
                             self.axis_titles['Teff'],
-                            self.axis_titles['Tdust']),
+                            self.axis_titles['Tdust']]
+
+                if self.options.use_variance:
+                    labels.append(self.axis_titles['variance'])
+
+                fig = corner.corner(data, bins=20,
+                    labels=labels,
                     ms=12, title_kwargs={'fontsize': 3.1*self.figsize},
                     range=data_range,
                     hist_kwargs={'linewidth': 0.4*self.figsize},
@@ -1228,6 +1295,7 @@ def main():
     parser = sed.add_options(usage=sed.usagestring)
     opt = parser.parse_args()
     sed.options = opt
+    sed.fit.options = opt
 
     if not os.path.exists(sed.outdir):
         os.makedirs(sed.outdir)
@@ -1247,6 +1315,22 @@ def main():
             print('Plot type must be one of {typs}.  Continuing...')
 
         models = opt.model.split(',')
+        dust_comps = str(opt.dust_comp).split(',')
+        dust_widths = str(opt.dust_width).split(',')
+
+        # Update RSG models to include all composition and dust width info
+        new_models = []
+        for model in models:
+            if 'rsg' not in model:
+                new_models.append(model)
+                continue
+
+            for comp in dust_comps:
+                for width in dust_widths:
+                    new_models.append(f'rsg_{comp}_{width}')
+
+        models = copy.copy(new_models)
+        print(models)
 
         func = sed.plot_types[typ]
         kwargs=dict(opt._get_kwargs())
