@@ -1,0 +1,23 @@
+# Conda environment for progenitors
+# Create: conda env create -f environment.yml
+# Activate: conda activate progenitors
+# Update: conda env update -f environment.yml --prune
+
+name: progenitors
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.12
+  - astropy>=5
+  - numpy
+  - requests
+  - pandas
+  - astroquery
+  - dustmaps
+  - synphot>=1.6
+  - pip
+  - pip:
+    - google-api-python-client
+    - google-auth-oauthlib
+    - google-auth-httplib2
