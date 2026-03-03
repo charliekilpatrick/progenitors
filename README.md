@@ -1,6 +1,6 @@
 # Progenitors
 
-[![CI](https://github.com/charliekilpatrick/progenitors/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/charliekilpatrick/progenitors/actions/workflows/ci.yml)
+[![CI](https://github.com/charliekilpatrick/progenitors/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/charliekilpatrick/progenitors/actions/workflows/ci.yml) [![Documentation](https://github.com/charliekilpatrick/progenitors/actions/workflows/docs.yml/badge.svg?branch=main)](https://charliekilpatrick.github.io/progenitors/)
 
 Methods for downloading, organizing, and analyzing data for progenitor systems of explosive transients (e.g., supernovae). Includes a Google Sheets–driven pipeline, SED fitting from photometry, and the Davies et al. (2018) progenitor analysis (luminosity function and mass MC) in Python.
 
