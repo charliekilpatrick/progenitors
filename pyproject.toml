@@ -1,0 +1,66 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "progenitors"
+dynamic = ["version"]
+description = "Methods for downloading and analyzing data for progenitor systems of explosive transients"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "astropy>=5",
+    "numpy",
+    "requests",
+    "pandas",
+    "astroquery",
+    "dustmaps",
+    "google-api-python-client",
+    "google-auth-oauthlib",
+    "google-auth-httplib2",
+    "synphot>=1.6",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7",
+    "pytest-cov>=4",
+    "sphinx>=7",
+    "sphinx-rtd-theme",
+]
+# HST/JWST filter names (e.g. wfc3,uvis1,f438w) require stsynphot
+sed = [
+    "synphot>=1.6",
+]
+sed_hst = [
+    "synphot>=1.6",
+    "stsynphot",
+]
+sed_fit = [
+    "emcee",
+    "dynesty",
+]
+
+[project.scripts]
+progenitors = "progenitors.__main__:main"
+
+[tool.setuptools.dynamic]
+version = {attr = "progenitors._version.__version__"}
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["progenitors"]
+
+[tool.setuptools.package-data]
+progenitors = ["scripts/*.sh", "davies18/data/input_masses.txt"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+filterwarnings = ["ignore::UserWarning", "ignore::DeprecationWarning"]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "remote: marks tests that require network or external services",
+]
