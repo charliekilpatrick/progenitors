@@ -1,0 +1,22 @@
+# M-L relation STARS (from IDL AL=2.67, GL=2.02): mass_mod (Msun), lfin_mod (log10 L)
+# Used when M-L_S09.txt / M-L_KEPLER.txt are not available; same scaling as LFUNC_results.tex STARS row.
+8.0 4.48
+9.0 4.58
+10.0 4.68
+11.0 4.76
+12.0 4.84
+13.0 4.91
+14.0 4.97
+15.0 5.03
+16.0 5.08
+17.0 5.13
+18.0 5.18
+19.0 5.22
+20.0 5.26
+22.0 5.33
+24.0 5.40
+26.0 5.46
+28.0 5.51
+30.0 5.56
+35.0 5.66
+40.0 5.75
