@@ -1,3 +1,7 @@
+.venv/
+progenitors/simulation/
+*.egg-info/
+*.egg/
 metadata/*
 sed/data/bpass/z*
 sed/data/mist/
