@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../../../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>progenitors.sed.synphot_compat &#8212; progenitors 0.1.0 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/basic.css?v=b08954a9" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/alabaster.css?v=27fed22d" />
+    <script src="../../../_static/documentation_options.js?v=01f34227"></script>
+    <script src="../../../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <h1>Source code for progenitors.sed.synphot_compat</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">Synphot compatibility layer for progenitors.sed.</span>
+
+<span class="sd">Provides a uniform API on top of synphot for spectra, bandpasses, and</span>
+<span class="sd">observations. Public API: setref, get_spectral_data_root, ArraySpectrum,</span>
+<span class="sd">BlackBody, Observation, ObsBandpass, ArrayBandpass, FileSpectrum.</span>
+<span class="sd">Uses synphot; HST/JWST filters require stsynphot.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">astropy</span><span class="w"> </span><span class="kn">import</span> <span class="n">units</span> <span class="k">as</span> <span class="n">u</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">synphot</span><span class="w"> </span><span class="kn">import</span> <span class="n">SourceSpectrum</span><span class="p">,</span> <span class="n">SpectralElement</span><span class="p">,</span> <span class="n">Observation</span> <span class="k">as</span> <span class="n">SynphotObservation</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">synphot.models</span><span class="w"> </span><span class="kn">import</span> <span class="n">Empirical1D</span><span class="p">,</span> <span class="n">BlackBodyNorm1D</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">synphot</span><span class="w"> </span><span class="kn">import</span> <span class="n">units</span> <span class="k">as</span> <span class="n">synphot_units</span>
+
+<span class="c1"># Optional: HST/JWST bandpasses</span>
+<span class="k">try</span><span class="p">:</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">stsynphot</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">stsyn</span>
+    <span class="n">_HAS_STSYN</span> <span class="o">=</span> <span class="kc">True</span>
+<span class="k">except</span> <span class="ne">ImportError</span><span class="p">:</span>
+    <span class="n">stsyn</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">_HAS_STSYN</span> <span class="o">=</span> <span class="kc">False</span>
+
+
+<div class="viewcode-block" id="setref">
+<a class="viewcode-back" href="../../../sed.html#progenitors.sed.synphot_compat.setref">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">setref</span><span class="p">(</span><span class="n">area</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    No-op for compatibility with legacy code.</span>
+
+<span class="sd">    synphot passes area to countrate() when needed; not used for magnitude</span>
+<span class="sd">    calculations.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    area : float, optional</span>
+<span class="sd">        Telescope area (ignored).</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">pass</span></div>
+
+
+
+<div class="viewcode-block" id="get_spectral_data_root">
+<a class="viewcode-back" href="../../../sed.html#progenitors.sed.synphot_compat.get_spectral_data_root">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">get_spectral_data_root</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Root directory for spectral data (e.g. Pickles, CDBS grid).</span>
+
+<span class="sd">    Prefers SYNPATH (synphot convention); falls back to PYSYN_CDBS</span>
+<span class="sd">    (stsynphot/legacy). Returns empty string if neither is set.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    str</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;SYNPATH&quot;</span><span class="p">,</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;PYSYN_CDBS&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">))</span></div>
+
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">_SpectrumWrapper</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Wrap synphot SourceSpectrum with .wave, .flux, .name.&quot;&quot;&quot;</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">sp</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s1">&#39;&#39;</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_sp</span> <span class="o">=</span> <span class="n">sp</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_name</span> <span class="o">=</span> <span class="n">name</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_wave</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_flux</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">waveset</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_sp</span><span class="o">.</span><span class="n">waveset</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">wave</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_wave</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">ws</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_sp</span><span class="o">.</span><span class="n">waveset</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_wave</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">ws</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">u</span><span class="o">.</span><span class="n">AA</span><span class="p">)</span><span class="o">.</span><span class="n">value</span> <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">ws</span><span class="p">,</span> <span class="s1">&#39;to&#39;</span><span class="p">)</span> <span class="k">else</span> <span class="n">ws</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_wave</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">flux</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_flux</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">f</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_sp</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_sp</span><span class="o">.</span><span class="n">waveset</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_flux</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">f</span><span class="o">.</span><span class="n">value</span> <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">f</span><span class="p">,</span> <span class="s1">&#39;value&#39;</span><span class="p">)</span> <span class="k">else</span> <span class="n">f</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_flux</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">name</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_name</span>
+
+    <span class="nd">@name</span><span class="o">.</span><span class="n">setter</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">name</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_name</span> <span class="o">=</span> <span class="n">value</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__mul__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">np</span><span class="o">.</span><span class="n">isscalar</span><span class="p">(</span><span class="n">other</span><span class="p">):</span>
+            <span class="k">return</span> <span class="n">_SpectrumWrapper</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_sp</span> <span class="o">*</span> <span class="n">other</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_name</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">NotImplemented</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__rmul__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">np</span><span class="o">.</span><span class="n">isscalar</span><span class="p">(</span><span class="n">other</span><span class="p">):</span>
+            <span class="k">return</span> <span class="n">_SpectrumWrapper</span><span class="p">(</span><span class="n">other</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">_sp</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_name</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">NotImplemented</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">convert</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">unit</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Convert spectrum to given flux unit (e.g. &#39;flam&#39;, &#39;fnu&#39;).&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">unit</span> <span class="o">==</span> <span class="s1">&#39;flam&#39;</span><span class="p">:</span>
+            <span class="n">flux_unit</span> <span class="o">=</span> <span class="n">u</span><span class="o">.</span><span class="n">erg</span> <span class="o">/</span> <span class="n">u</span><span class="o">.</span><span class="n">s</span> <span class="o">/</span> <span class="n">u</span><span class="o">.</span><span class="n">cm</span><span class="o">**</span><span class="mi">2</span> <span class="o">/</span> <span class="n">u</span><span class="o">.</span><span class="n">AA</span>
+        <span class="k">elif</span> <span class="n">unit</span> <span class="o">==</span> <span class="s1">&#39;fnu&#39;</span><span class="p">:</span>
+            <span class="n">flux_unit</span> <span class="o">=</span> <span class="n">u</span><span class="o">.</span><span class="n">erg</span> <span class="o">/</span> <span class="n">u</span><span class="o">.</span><span class="n">s</span> <span class="o">/</span> <span class="n">u</span><span class="o">.</span><span class="n">cm</span><span class="o">**</span><span class="mi">2</span> <span class="o">/</span> <span class="n">u</span><span class="o">.</span><span class="n">Hz</span>
+        <span class="k">elif</span> <span class="n">unit</span> <span class="o">==</span> <span class="s1">&#39;count&#39;</span> <span class="ow">or</span> <span class="n">unit</span> <span class="o">==</span> <span class="s1">&#39;counts&#39;</span><span class="p">:</span>
+            <span class="n">flux_unit</span> <span class="o">=</span> <span class="n">synphot_units</span><span class="o">.</span><span class="n">PHOTLAM</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">flux_unit</span> <span class="o">=</span> <span class="n">u</span><span class="o">.</span><span class="n">Unit</span><span class="p">(</span><span class="n">unit</span><span class="p">)</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">unit</span><span class="p">,</span> <span class="nb">str</span><span class="p">)</span> <span class="k">else</span> <span class="n">unit</span>
+        <span class="n">wave</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_sp</span><span class="o">.</span><span class="n">waveset</span>
+        <span class="n">f</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_sp</span><span class="p">(</span><span class="n">wave</span><span class="p">)</span>
+        <span class="n">flux_val</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">f</span><span class="o">.</span><span class="n">value</span> <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">f</span><span class="p">,</span> <span class="s1">&#39;value&#39;</span><span class="p">)</span> <span class="k">else</span> <span class="n">f</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">unit</span> <span class="o">==</span> <span class="s1">&#39;fnu&#39;</span> <span class="ow">and</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">synphot_units</span><span class="p">,</span> <span class="s1">&#39;convert_flux&#39;</span><span class="p">):</span>
+            <span class="n">flux_val</span> <span class="o">=</span> <span class="n">synphot_units</span><span class="o">.</span><span class="n">convert_flux</span><span class="p">(</span>
+                <span class="n">wave</span><span class="p">,</span> <span class="n">flux_val</span><span class="p">,</span> <span class="n">flux_unit</span>
+            <span class="p">)</span><span class="o">.</span><span class="n">value</span>
+        <span class="k">elif</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">f</span><span class="p">,</span> <span class="s1">&#39;to&#39;</span><span class="p">):</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">flux_val</span> <span class="o">=</span> <span class="n">f</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">flux_unit</span><span class="p">)</span><span class="o">.</span><span class="n">value</span>
+            <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+                <span class="k">pass</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_sp</span> <span class="o">=</span> <span class="n">SourceSpectrum</span><span class="p">(</span>
+            <span class="n">Empirical1D</span><span class="p">,</span> <span class="n">points</span><span class="o">=</span><span class="n">wave</span><span class="p">,</span> <span class="n">lookup_table</span><span class="o">=</span><span class="n">flux_val</span> <span class="o">*</span> <span class="n">flux_unit</span>
+        <span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_wave</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_flux</span> <span class="o">=</span> <span class="kc">None</span>
+
+
+<div class="viewcode-block" id="ArraySpectrum">
+<a class="viewcode-back" href="../../../sed.html#progenitors.sed.synphot_compat.ArraySpectrum">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">ArraySpectrum</span><span class="p">(</span><span class="n">wave</span><span class="p">,</span> <span class="n">flux</span><span class="p">,</span> <span class="n">waveunits</span><span class="o">=</span><span class="s1">&#39;angstrom&#39;</span><span class="p">,</span> <span class="n">fluxunits</span><span class="o">=</span><span class="s1">&#39;flam&#39;</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s1">&#39;&#39;</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Build a spectrum from wavelength and flux arrays (synphot backend).</span>
+
+<span class="sd">    Returns a wrapper with .wave, .flux, .name.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    wave : array-like</span>
+<span class="sd">        Wavelength values.</span>
+<span class="sd">    flux : array-like</span>
+<span class="sd">        Flux values (same length as wave).</span>
+<span class="sd">    waveunits : str, optional</span>
+<span class="sd">        Wavelength unit (e.g. &#39;angstrom&#39;, &#39;nm&#39;). Default is &#39;angstrom&#39;.</span>
+<span class="sd">    fluxunits : str, optional</span>
+<span class="sd">        Flux unit: &#39;flam&#39;, &#39;fnu&#39;, &#39;count&#39;/&#39;counts&#39;, or astropy unit string.</span>
+<span class="sd">        Default is &#39;flam&#39;.</span>
+<span class="sd">    name : str, optional</span>
+<span class="sd">        Label for the spectrum.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    _SpectrumWrapper</span>
+<span class="sd">        Object with .wave, .flux, .name and .convert(unit) method.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">wave</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">wave</span><span class="p">)</span>
+    <span class="n">flux</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">flux</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">waveunits</span> <span class="o">==</span> <span class="s1">&#39;angstrom&#39;</span> <span class="ow">or</span> <span class="n">waveunits</span> <span class="o">==</span> <span class="s1">&#39;Angstrom&#39;</span><span class="p">:</span>
+        <span class="n">wave_u</span> <span class="o">=</span> <span class="n">wave</span> <span class="o">*</span> <span class="n">u</span><span class="o">.</span><span class="n">AA</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">wave_u</span> <span class="o">=</span> <span class="n">wave</span> <span class="o">*</span> <span class="n">u</span><span class="o">.</span><span class="n">Unit</span><span class="p">(</span><span class="n">waveunits</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">fluxunits</span> <span class="o">==</span> <span class="s1">&#39;flam&#39;</span><span class="p">:</span>
+        <span class="n">flux_u</span> <span class="o">=</span> <span class="n">flux</span> <span class="o">*</span> <span class="p">(</span><span class="n">u</span><span class="o">.</span><span class="n">erg</span> <span class="o">/</span> <span class="n">u</span><span class="o">.</span><span class="n">s</span> <span class="o">/</span> <span class="n">u</span><span class="o">.</span><span class="n">cm</span><span class="o">**</span><span class="mi">2</span> <span class="o">/</span> <span class="n">u</span><span class="o">.</span><span class="n">AA</span><span class="p">)</span>
+    <span class="k">elif</span> <span class="n">fluxunits</span> <span class="o">==</span> <span class="s1">&#39;fnu&#39;</span><span class="p">:</span>
+        <span class="n">flux_u</span> <span class="o">=</span> <span class="n">flux</span> <span class="o">*</span> <span class="p">(</span><span class="n">u</span><span class="o">.</span><span class="n">erg</span> <span class="o">/</span> <span class="n">u</span><span class="o">.</span><span class="n">s</span> <span class="o">/</span> <span class="n">u</span><span class="o">.</span><span class="n">cm</span><span class="o">**</span><span class="mi">2</span> <span class="o">/</span> <span class="n">u</span><span class="o">.</span><span class="n">Hz</span><span class="p">)</span>
+    <span class="k">elif</span> <span class="n">fluxunits</span> <span class="o">==</span> <span class="s1">&#39;count&#39;</span> <span class="ow">or</span> <span class="n">fluxunits</span> <span class="o">==</span> <span class="s1">&#39;counts&#39;</span><span class="p">:</span>
+        <span class="c1"># Dimensionless (e.g. extinction curve) or PHOTLAM</span>
+        <span class="n">flux_u</span> <span class="o">=</span> <span class="n">flux</span> <span class="o">*</span> <span class="n">u</span><span class="o">.</span><span class="n">dimensionless_unscaled</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">flux_u</span> <span class="o">=</span> <span class="n">flux</span> <span class="o">*</span> <span class="n">u</span><span class="o">.</span><span class="n">Unit</span><span class="p">(</span><span class="n">fluxunits</span><span class="p">)</span>
+    <span class="n">sp</span> <span class="o">=</span> <span class="n">SourceSpectrum</span><span class="p">(</span><span class="n">Empirical1D</span><span class="p">,</span> <span class="n">points</span><span class="o">=</span><span class="n">wave_u</span><span class="p">,</span> <span class="n">lookup_table</span><span class="o">=</span><span class="n">flux_u</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">_SpectrumWrapper</span><span class="p">(</span><span class="n">sp</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="n">name</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="BlackBody">
+<a class="viewcode-back" href="../../../sed.html#progenitors.sed.synphot_compat.BlackBody">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">BlackBody</span><span class="p">(</span><span class="n">temp</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Blackbody spectrum at given temperature (synphot backend).</span>
+
+<span class="sd">    Returns wrapper; use .convert(&#39;fnu&#39;) then scale.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    temp : float</span>
+<span class="sd">        Temperature in Kelvin.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    _SpectrumWrapper</span>
+<span class="sd">        Normalized blackbody with .wave, .flux.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">sp</span> <span class="o">=</span> <span class="n">SourceSpectrum</span><span class="p">(</span><span class="n">BlackBodyNorm1D</span><span class="p">,</span> <span class="n">temperature</span><span class="o">=</span><span class="n">temp</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">_SpectrumWrapper</span><span class="p">(</span><span class="n">sp</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s1">&#39;&#39;</span><span class="p">)</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_unwrap_spectrum</span><span class="p">(</span><span class="n">sp</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">sp</span><span class="o">.</span><span class="n">_sp</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">sp</span><span class="p">,</span> <span class="n">_SpectrumWrapper</span><span class="p">)</span> <span class="k">else</span> <span class="n">sp</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_taper_bp</span><span class="p">(</span><span class="n">bp</span><span class="p">):</span>
+    <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">bp</span><span class="p">,</span> <span class="s1">&#39;taper&#39;</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">bp</span><span class="o">.</span><span class="n">taper</span><span class="p">()</span>
+    <span class="k">return</span> <span class="n">bp</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">_ObservationWrapper</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Wrap synphot Observation to provide .effstim(&#39;abmag&#39;) returning float.&quot;&quot;&quot;</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">obs</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_obs</span> <span class="o">=</span> <span class="n">obs</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">effstim</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">flux_unit</span><span class="p">):</span>
+        <span class="n">val</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_obs</span><span class="o">.</span><span class="n">effstim</span><span class="p">(</span><span class="n">flux_unit</span><span class="o">=</span><span class="n">flux_unit</span><span class="p">)</span>
+        <span class="k">return</span> <span class="nb">float</span><span class="p">(</span><span class="n">val</span><span class="o">.</span><span class="n">value</span><span class="p">)</span> <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">val</span><span class="p">,</span> <span class="s1">&#39;value&#39;</span><span class="p">)</span> <span class="k">else</span> <span class="nb">float</span><span class="p">(</span><span class="n">val</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="Observation">
+<a class="viewcode-back" href="../../../sed.html#progenitors.sed.synphot_compat.Observation">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">Observation</span><span class="p">(</span><span class="n">spectrum</span><span class="p">,</span> <span class="n">bandpass</span><span class="p">,</span> <span class="n">binset</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">force</span><span class="o">=</span><span class="s1">&#39;taper&#39;</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Observe a spectrum through a bandpass (synphot backend).</span>
+
+<span class="sd">    Use .effstim(&#39;abmag&#39;) or .effstim(&#39;vegamag&#39;).</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    spectrum : _SpectrumWrapper or SourceSpectrum</span>
+<span class="sd">        Source spectrum.</span>
+<span class="sd">    bandpass : SpectralElement or array bandpass</span>
+<span class="sd">        Filter bandpass.</span>
+<span class="sd">    binset : array-like, optional</span>
+<span class="sd">        Wavelength set for integration.</span>
+<span class="sd">    force : str, optional</span>
+<span class="sd">        If &#39;taper&#39;, taper bandpass edges. Default is &#39;taper&#39;.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    _ObservationWrapper</span>
+<span class="sd">        Object with .effstim(flux_unit) returning a float (e.g. magnitude).</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">sp</span> <span class="o">=</span> <span class="n">_unwrap_spectrum</span><span class="p">(</span><span class="n">spectrum</span><span class="p">)</span>
+    <span class="n">bp</span> <span class="o">=</span> <span class="n">_taper_bp</span><span class="p">(</span><span class="n">bandpass</span><span class="p">)</span> <span class="k">if</span> <span class="n">force</span> <span class="o">==</span> <span class="s1">&#39;taper&#39;</span> <span class="k">else</span> <span class="n">bandpass</span>
+    <span class="n">obs</span> <span class="o">=</span> <span class="n">SynphotObservation</span><span class="p">(</span><span class="n">sp</span><span class="p">,</span> <span class="n">bp</span><span class="p">,</span> <span class="n">binset</span><span class="o">=</span><span class="n">binset</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">_ObservationWrapper</span><span class="p">(</span><span class="n">obs</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="ObsBandpass">
+<a class="viewcode-back" href="../../../sed.html#progenitors.sed.synphot_compat.ObsBandpass">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">ObsBandpass</span><span class="p">(</span><span class="n">name</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Load a named filter bandpass.</span>
+
+<span class="sd">    Uses synphot for standard names; stsynphot for HST/JWST (e.g. wfc3,uvis1,f438w).</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    name : str</span>
+<span class="sd">        Filter name (e.g. &#39;johnson,V&#39;, &#39;wfc3,uvis1,f438w&#39;).</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    SpectralElement</span>
+<span class="sd">        Bandpass transmission curve.</span>
+
+<span class="sd">    Raises</span>
+<span class="sd">    ------</span>
+<span class="sd">    ImportError</span>
+<span class="sd">        If HST/JWST filter requested and stsynphot is not installed.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">name_lower</span> <span class="o">=</span> <span class="n">name</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span>
+    <span class="k">if</span> <span class="nb">any</span><span class="p">(</span><span class="n">x</span> <span class="ow">in</span> <span class="n">name_lower</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="p">(</span><span class="s1">&#39;wfc3&#39;</span><span class="p">,</span> <span class="s1">&#39;acs&#39;</span><span class="p">,</span> <span class="s1">&#39;wfpc2&#39;</span><span class="p">,</span> <span class="s1">&#39;jwst&#39;</span><span class="p">,</span> <span class="s1">&#39;nircam&#39;</span><span class="p">,</span> <span class="s1">&#39;miri&#39;</span><span class="p">)):</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">_HAS_STSYN</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ImportError</span><span class="p">(</span>
+                <span class="s2">&quot;HST/JWST filter &#39;</span><span class="si">%s</span><span class="s2">&#39; requires stsynphot. &quot;</span>
+                <span class="s2">&quot;Install with: pip install stsynphot&quot;</span> <span class="o">%</span> <span class="n">name</span>
+            <span class="p">)</span>
+        <span class="k">return</span> <span class="n">stsyn</span><span class="o">.</span><span class="n">band</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">SpectralElement</span><span class="o">.</span><span class="n">from_filter</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">_HAS_STSYN</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ImportError</span><span class="p">(</span>
+                <span class="s2">&quot;Filter &#39;</span><span class="si">%s</span><span class="s2">&#39; may require stsynphot. &quot;</span>
+                <span class="s2">&quot;Install with: pip install stsynphot&quot;</span> <span class="o">%</span> <span class="n">name</span>
+            <span class="p">)</span>
+        <span class="k">return</span> <span class="n">stsyn</span><span class="o">.</span><span class="n">band</span><span class="p">(</span><span class="n">name</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="ArrayBandpass">
+<a class="viewcode-back" href="../../../sed.html#progenitors.sed.synphot_compat.ArrayBandpass">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">ArrayBandpass</span><span class="p">(</span><span class="n">wave</span><span class="p">,</span> <span class="n">trans</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="n">waveunits</span><span class="o">=</span><span class="s1">&#39;Angstrom&#39;</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Build a bandpass from wavelength and transmission arrays.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    wave : array-like</span>
+<span class="sd">        Wavelength values.</span>
+<span class="sd">    trans : array-like</span>
+<span class="sd">        Transmission (0-1) at each wavelength.</span>
+<span class="sd">    name : str, optional</span>
+<span class="sd">        Unused; for API compatibility.</span>
+<span class="sd">    waveunits : str, optional</span>
+<span class="sd">        Wavelength unit. Default is &#39;Angstrom&#39;.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    SpectralElement</span>
+<span class="sd">        Bandpass for use with Observation.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">wave</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">wave</span><span class="p">)</span>
+    <span class="n">trans</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">trans</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">waveunits</span> <span class="o">==</span> <span class="s1">&#39;Angstrom&#39;</span> <span class="ow">or</span> <span class="n">waveunits</span> <span class="o">==</span> <span class="s1">&#39;angstrom&#39;</span><span class="p">:</span>
+        <span class="n">wave_u</span> <span class="o">=</span> <span class="n">wave</span> <span class="o">*</span> <span class="n">u</span><span class="o">.</span><span class="n">AA</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">wave_u</span> <span class="o">=</span> <span class="n">wave</span> <span class="o">*</span> <span class="n">u</span><span class="o">.</span><span class="n">Unit</span><span class="p">(</span><span class="n">waveunits</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">SpectralElement</span><span class="p">(</span><span class="n">Empirical1D</span><span class="p">,</span> <span class="n">points</span><span class="o">=</span><span class="n">wave_u</span><span class="p">,</span> <span class="n">lookup_table</span><span class="o">=</span><span class="n">trans</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="FileSpectrum">
+<a class="viewcode-back" href="../../../sed.html#progenitors.sed.synphot_compat.FileSpectrum">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">FileSpectrum</span><span class="p">(</span><span class="n">filename</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Load a spectrum from a file (synphot backend; e.g. FITS).</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    filename : str</span>
+<span class="sd">        Path to spectrum file.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    _SpectrumWrapper</span>
+<span class="sd">        Object with .wave, .flux, .name.</span>
+
+<span class="sd">    Raises</span>
+<span class="sd">    ------</span>
+<span class="sd">    OSError, FileNotFoundError</span>
+<span class="sd">        If file cannot be opened.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">sp</span> <span class="o">=</span> <span class="n">SourceSpectrum</span><span class="o">.</span><span class="n">from_file</span><span class="p">(</span><span class="n">filename</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">_SpectrumWrapper</span><span class="p">(</span><span class="n">sp</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s1">&#39;&#39;</span><span class="p">)</span></div>
+
+</pre></div>
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h3><a href="../../../index.html">Table of Contents</a></h3>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../sed.html">SED module (progenitors.sed)</a></li>
+</ul>
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../index.html">Documentation overview</a><ul>
+  <li><a href="../../index.html">Module code</a><ul>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+<search id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;Progenitors package authors.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 9.1.0</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+    </div>
+
+    
+
+    
+  </body>
+</html>
