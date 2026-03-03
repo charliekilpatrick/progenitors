@@ -1,6 +1,6 @@
 # Davies et al. (2018) — Progenitor masses of Type II supernovae
 
-This directory contains a **Python reimplementation** of the analysis from Davies & Beasor (2018), plus the original IDL code and data used to reproduce the same results.
+This directory contains a **Python reimplementation** of the analysis from Davies & Beasor (2018), plus the original IDL code and data used to reproduce the same results. Part of the **progenitors** package; see the main [README.md](../../README.md) for installation and package layout.
 
 ## Citation
 

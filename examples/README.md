@@ -1,6 +1,6 @@
 # Examples
 
-Scripts to exercise main modules. Run from **repository root** with the package installed (`pip install -e .`). No live credentials or network unless noted.
+Scripts to exercise main modules. Run from the **repository root** with the package installed (`pip install -e .` or `pip install -e ".[dev]"`). No live credentials or network unless noted. See the main [README.md](../README.md) for installation and package layout.
 
 ```bash
 python examples/example_util.py

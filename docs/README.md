@@ -1,6 +1,6 @@
 # Building the documentation
 
-From the **project root** (not from `docs/`):
+From the **repository root** (see main [README.md](../README.md) for installation):
 
 ```bash
 pip install -e ".[dev]"   # includes sphinx, sphinx-rtd-theme
