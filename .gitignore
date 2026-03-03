@@ -1,4 +1,6 @@
 .venv/
+.coverage
+dist/
 progenitors/simulation/
 *.egg-info/
 *.egg/
