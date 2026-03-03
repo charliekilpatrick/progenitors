@@ -1,0 +1,36 @@
+# %ECSV 0.9
+# ---
+# datatype:
+# - {name: MJD, datatype: string}
+# - {name: Instrument, datatype: string}
+# - {name: Filter, datatype: string}
+# - {name: Exposure, datatype: float64}
+# - {name: Magnitude, datatype: float64}
+# - {name: Uncertainty, datatype: float64}
+# - {name: Use, datatype: uint8}
+# - {name: Magsystem, datatype: string}
+# meta: !!omap
+# - {name: 2017eaw}
+# - {ra: 308.684333}
+# - {dec: 60.193289}
+# - {distance: 6.72}
+# - {dist_error: 0.15}
+# - {host_ebv: 0.0}
+# - {host_rv: 3.1}
+# - {magsystem: ab}
+# - {host_galaxy: NGC_6946}
+# - {ads: https://ui.adsabs.harvard.edu/abs/2018MNRAS.481.2536K}
+# schema: astropy-2.0
+MJD          Instrument   Filter   Exposure       Magnitude Uncertainty Use Magsystem
+53216.03     ACS/WFC      F814W    120.0000       22.550    0.0360      1   vegamag
+53216.04     ACS/WFC      F658N    700.0000       23.600    0.0000      0   vegamag
+57427.76     WFC3/IR      F128N    2823.48        19.771    0.0320      0   vegamag
+57427.83     WFC3/IR      F110W    455.88         20.712    0.0120      1   vegamag
+57685.64     WFC3/IR      F160W    396.92         19.377    0.0070      1   vegamag
+57685.64     WFC3/IR      F164N    2396.93        19.109    0.0120      1   vegamag
+57687.74     ACS/WFC      F606W    2430.0000      26.366    0.0490      1   vegamag
+57687.81     ACS/WFC      F814W    2570.0000      22.825    0.0090      1   vegamag
+--------     Spitzer/IRAC Ch1      0.0            20.7700   0.2400      1   abmag
+--------     Spitzer/IRAC Ch2      0.0            21.16     0.2800      1   abmag
+--------     Spitzer/IRAC Ch3      0.0            20.4745   0.0000      1   abmag
+--------     Spitzer/IRAC Ch4      0.0            19.3224   0.0000      1   abmag

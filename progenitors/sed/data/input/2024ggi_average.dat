@@ -1,0 +1,48 @@
+# %ECSV 0.9
+# ---
+# datatype:
+# - {name: MJD, datatype: string}
+# - {name: Instrument, datatype: string}
+# - {name: Filter, datatype: string}
+# - {name: Exposure, datatype: float64}
+# - {name: Magnitude, datatype: float64}
+# - {name: Uncertainty, datatype: float64}
+# - {name: Use, datatype: uint8}
+# meta: !!omap
+# - {name: 2024ggi }
+# - {ra: 169.592030106 }
+# - {dec: -32.8375716158 }
+# - {distance: 7.24 }
+# - {dist_error: 0.20 }
+# - {host_ebv: 0.084 }
+# - {host_ebv_error: 0.018 }
+# - {host_rv: 3.1 }
+# - {redshift: 0.002215 }
+# - {magsystem: ab }
+# - {host_galaxy: NGC3621 }
+# - {discovery_date: 2024-04-11T03:22:35.616 }
+# schema: astropy-2.0
+MJD            Instrument     Filter   Exposure       Magnitude Uncertainty Use
+49721.90922    WFPC2          F439W    1980.0000      25.2628   0.0000      1
+49722.01501    WFPC2          F336W    3780.0000      26.0984   0.0000      1
+49741.80714    WFPC2          F439W    1800.0000      25.6430   0.0000      1
+52673.76754    ACS/WFC        F435W    1080.0000      27.0271   0.0000      1
+54848.57653    WFPC2          F658N    1800.0000      23.0746   0.0000      1
+60306.46653    ACS/WFC        F814W    9000.0000      23.4907   0.4967      1
+60306.47580    ACS/WFC        F475W    1532.0000      27.2759   0.0000      1
+60306.48000    ACS/WFC        F555W    9000.0000      27.1328   0.3944      1
+56713.38712    VISTA/VIRCAM   Ks       60.0           20.0030   0.2624      1
+56713.39164    VISTA/VIRCAM   J        60.0           20.4066   0.3312      1
+58830.17905    WFC3/UVIS      F336W    2282.0000      26.8903   0.0000      1
+58830.26816    WFC3/UVIS      F275W    2322.0000      25.3256   0.0000      1
+60083.50079    WFC3/UVIS      F300X    2442.0000      27.5408   0.0000      1
+-----------    DECam          g        60.0           23.5820   0.0000      1
+-----------    DECam          r        60.0           23.7891   0.0000      1
+-----------    DECam          i        60.0           22.7534   0.3029      1
+-----------    DECam          z        60.0           21.5459   0.2244      1
+53152.49225    Spitzer/IRAC   Ch3      26.8           20.3638   0.0000      1
+53152.49225    Spitzer/IRAC   Ch4      26.8           19.5834   0.0000      1
+53166.07885    Spitzer/IRAC   Ch3      26.8           20.4669   0.0000      1
+53166.07885    Spitzer/IRAC   Ch4      26.8           19.6184   0.0000      1
+-----------    Spitzer/IRAC   Ch1      9000.0000      21.3702   0.6097      1
+-----------    Spitzer/IRAC   Ch2      9000.0000      21.3111   0.3818      1

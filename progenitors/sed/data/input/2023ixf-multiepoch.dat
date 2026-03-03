@@ -1,0 +1,101 @@
+# %ECSV 0.9
+# ---
+# datatype:
+# - {name: MJD, datatype: string}
+# - {name: Instrument, datatype: string}
+# - {name: Filter, datatype: string}
+# - {name: Exposure, datatype: float64}
+# - {name: Magnitude, datatype: float64}
+# - {name: Uncertainty, datatype: float64}
+# - {name: Use, datatype: uint8}
+# meta: !!omap
+# - {name: 2023ixf }
+# - {ra: 210.910674637 }
+# - {dec: 54.3116510708 }
+# - {distance: 6.85 }
+# - {dist_error: 0.15 }
+# - {host_ebv: 0.033 }
+# - {host_rv: 3.1 }
+# - {magsystem: ab }
+# - {host_galaxy: M101 }
+# - {discovery_date: 2023-05-19T17:27:15.000 }
+# schema: astropy-2.0
+MJD            Instrument     Filter  Exposure        Magnitude Uncertainty Use
+52594.02153833 ACS/WFC        F814W     720.000       24.881    0.059       1
+53045.00689815 ACS/WFC        F658N    2440.000       25.332    0.284       0
+58207.43844907 ACS/WFC        F658N    5770.000       25.488    0.000       0
+52594.00959491 ACS/WFC        F555W     720.000       27.099    0.000       0
+52593.99328704 ACS/WFC        F435W     900.000       27.393    0.000       1
+58207.45609954 ACS/WFC        F435W    7423.000       27.799    0.000       1
+51261.03903935 WFPC2          F675W     900.000       26.422    0.230       0
+51346.05293357 WFPC2          F547M    1000.000       26.416    0.000       1
+51261.11195602 WFPC2          F547M    1420.000       26.273    0.000       1
+52878.32239583 WFPC2          F336W    2400.000       27.025    0.000       1
+51260.97862269 WFPC2          F656N    1360.000       23.433    0.000       0
+51345.98973380 WFPC2          F656N    1200.000       23.776    0.000       0
+56735.85706019 WFC3/UVIS      F673N    1310.000       24.629    0.000       0
+-------------- Spitzer/IRAC   Ch1     20628.000       20.537    0.234       1
+-------------- Spitzer/IRAC   Ch2     23990.000       20.450    0.220       1
+55304.50416667 Gemini/NIRI    Kcont    2550.000       20.719    0.081       0
+56109.29688079 Mayall/NEWFIRM Ks        920.000       20.740    0.151       0
+56108.28935417 Mayall/NEWFIRM H         750.000       20.359    0.000       0
+56107.32408565 Mayall/NEWFIRM J         540.000       20.184    0.000       0
+53072.090300   Spitzer/IRAC   Ch1         0.0         20.2145   0.0809      1
+53072.090300   Spitzer/IRAC   Ch2         0.0         20.2452   0.1027      1
+53072.090300   Spitzer/IRAC   Ch3         0.0         20.3305   0.0000      1
+53072.090300   Spitzer/IRAC   Ch4         0.0         20.1858   0.0000      1
+53072.490100   Spitzer/IRAC   Ch1         0.0         20.2437   0.1078      1
+53072.490100   Spitzer/IRAC   Ch2         0.0         20.3399   0.1395      1
+53072.490100   Spitzer/IRAC   Ch3         0.0         20.3217   0.0000      1
+53072.490100   Spitzer/IRAC   Ch4         0.0         20.1815   0.0000      1
+55960.722600   Spitzer/IRAC   Ch1         0.0         20.7728   0.1524      1
+55980.993400   Spitzer/IRAC   Ch1         0.0         20.7925   0.1514      1
+56165.011700   Spitzer/IRAC   Ch2         0.0         20.7710   0.1539      1
+56337.065400   Spitzer/IRAC   Ch1         0.0         20.8265   0.1774      1
+56348.105600   Spitzer/IRAC   Ch1         0.0         20.6739   0.1380      1
+56516.352300   Spitzer/IRAC   Ch2         0.0         20.7026   0.1457      1
+56742.836100   Spitzer/IRAC   Ch1         0.0         20.2274   0.0848      1
+56742.836100   Spitzer/IRAC   Ch2         0.0         20.1341   0.0667      1
+56771.825300   Spitzer/IRAC   Ch1         0.0         20.2094   0.0838      1
+56771.825300   Spitzer/IRAC   Ch2         0.0         20.1588   0.0606      1
+56902.013600   Spitzer/IRAC   Ch1         0.0         20.4374   0.1481      1
+56902.013600   Spitzer/IRAC   Ch2         0.0         20.3411   0.1327      1
+57136.692400   Spitzer/IRAC   Ch1         0.0         20.7795   0.1349      1
+57136.692400   Spitzer/IRAC   Ch2         0.0         20.5119   0.0877      1
+57144.059700   Spitzer/IRAC   Ch1         0.0         20.6896   0.1135      1
+57144.059700   Spitzer/IRAC   Ch2         0.0         20.6223   0.0987      1
+57150.171900   Spitzer/IRAC   Ch1         0.0         20.5827   0.0982      1
+57150.171900   Spitzer/IRAC   Ch2         0.0         20.6656   0.0950      1
+57163.712400   Spitzer/IRAC   Ch1         0.0         20.5756   0.0899      1
+57163.712400   Spitzer/IRAC   Ch2         0.0         20.3987   0.0652      1
+57191.823400   Spitzer/IRAC   Ch2         0.0         20.6969   0.1154      1
+57191.823400   Spitzer/IRAC   Ch1         0.0         21.0117   0.1792      1
+57220.794000   Spitzer/IRAC   Ch1         0.0         20.9462   0.1923      1
+57220.794000   Spitzer/IRAC   Ch2         0.0         20.7505   0.1385      1
+57247.822700   Spitzer/IRAC   Ch1         0.0         20.9221   0.2014      1
+57247.822700   Spitzer/IRAC   Ch2         0.0         20.9642   0.1723      1
+57486.850600   Spitzer/IRAC   Ch1         0.0         20.5720   0.1104      1
+57486.850600   Spitzer/IRAC   Ch2         0.0         20.4298   0.0729      1
+57843.933400   Spitzer/IRAC   Ch1         0.0         20.2954   0.0891      1
+57843.933400   Spitzer/IRAC   Ch2         0.0         20.1990   0.0718      1
+57926.900500   Spitzer/IRAC   Ch2         0.0         20.3358   0.0807      1
+58009.670500   Spitzer/IRAC   Ch1         0.0         20.5043   0.1299      1
+58009.670500   Spitzer/IRAC   Ch2         0.0         20.6013   0.1384      1
+58232.953400   Spitzer/IRAC   Ch2         0.0         20.6202   0.1048      1
+58232.953400   Spitzer/IRAC   Ch1         0.0         20.5624   0.1069      1
+58292.869200   Spitzer/IRAC   Ch2         0.0         20.5771   0.0855      1
+58292.869200   Spitzer/IRAC   Ch1         0.0         20.7950   0.0852      1
+58380.220200   Spitzer/IRAC   Ch1         0.0         20.7445   0.1686      1
+58380.220200   Spitzer/IRAC   Ch2         0.0         20.8037   0.1586      1
+58572.077300   Spitzer/IRAC   Ch1         0.0         20.5249   0.1232      1
+58572.077300   Spitzer/IRAC   Ch2         0.0         20.3543   0.0841      1
+58614.389600   Spitzer/IRAC   Ch1         0.0         20.5278   0.1187      1
+58614.389600   Spitzer/IRAC   Ch2         0.0         20.3065   0.0734      1
+58655.680300   Spitzer/IRAC   Ch1         0.0         20.3850   0.0878      1
+58655.680300   Spitzer/IRAC   Ch2         0.0         20.2592   0.0687      1
+58697.498200   Spitzer/IRAC   Ch1         0.0         20.2633   0.0964      1
+58697.498200   Spitzer/IRAC   Ch2         0.0         20.3097   0.0823      1
+58740.011900   Spitzer/IRAC   Ch1         0.0         20.5235   0.1536      1
+58740.011900   Spitzer/IRAC   Ch2         0.0         20.4609   0.1198      1
+58781.313100   Spitzer/IRAC   Ch1         0.0         20.2721   0.1218      1
+58781.313100   Spitzer/IRAC   Ch2         0.0         20.1104   0.0798      1

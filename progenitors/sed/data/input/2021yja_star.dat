@@ -1,0 +1,32 @@
+# %ECSV 0.9
+# ---
+# datatype:
+# - {name: MJD, datatype: string}
+# - {name: Instrument, datatype: string}
+# - {name: Filter, datatype: string}
+# - {name: Exposure, datatype: float64}
+# - {name: Magnitude, datatype: float64}
+# - {name: Uncertainty, datatype: float64}
+# - {name: Use, datatype: int}
+# meta: !!omap
+# - {name: 2021yja}
+# - {ra: 51.0882448168 }
+# - {dec: -21.5655802482 }
+# - {distance: 23.4}
+# - {dist_error: 5.0}
+# - {host_ebv: 0.00}
+# - {host_rv: 3.1}
+# - {magsystem: ab}
+# - {host_galaxy: NGC1325}
+# - {discovery_date: 2021-09-08T13:12:00.000}
+# schema: astropy-2.0
+MJD         Instrument   Filter Exposure Magnitude Uncertainty Use
+49509.8033  WFPC2        F606W  160.0    24.05     0.06        1
+----------- DECam        g      810.0    25.05     0.21        1
+----------- DECam        r      1660.0   23.81     0.14        1
+----------- DECam        i      810.0    22.90     0.00        1
+----------- DECam        z      630.0    22.56     0.00        1
+----------- DECam        Y      360.0    21.90     0.00        1
+----------- Spitzer/IRAC Ch1    319.2    22.56     0.31        1
+----------- Spitzer/IRAC Ch2    1012.4   22.20     0.00        1
+
