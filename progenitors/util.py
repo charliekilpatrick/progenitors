@@ -3,16 +3,18 @@ Progenitor pipeline utilities: metadata fetching, TNS/YSE/NED/ADS, coordinates, 
 
 Settings: distance-method hierarchy and email template in progenitors/settings/util.py
 """
+import logging
 import requests
 import numpy as np
-import dustmaps.sfd
 import pandas
 import json
+import io
 import os
 import re
 import copy
 import sys
 import time
+import zipfile
 from collections import OrderedDict
 from astropy.coordinates import SkyCoord
 from astropy.table import Table, Column, unique, vstack
@@ -33,6 +35,8 @@ import smtplib
 import warnings
 warnings.filterwarnings('ignore')
 
+logger = logging.getLogger(__name__)
+
 Ned.TIMEOUT=30
 Vizier.ROW_LIMIT = -1
 
@@ -46,6 +50,10 @@ from .settings.util import (
     EMAIL_SUBJECT,
     EMAIL_MSG_TEMPLATE,
 )
+from .formatting_utils import is_number, parse_coord, round_to_decimal_places
+from .sfd_dust import import_dustmap, get_sfd
+
+round_to_n = round_to_decimal_places
 
 params = {
     "SHEET": os.environ.get("PROGENITORS_SHEET", ""),
@@ -61,7 +69,10 @@ params = {
         "user": os.environ.get("YSE_USER", ""),
         "password": os.environ.get("YSE_PASSWORD", ""),
     },
-    "metadata": os.path.join(basedir, "metadata"),
+    "metadata": os.environ.get(
+        "PROGENITORS_METADATA_DIR",
+        os.path.join(basedir, "progenitors", "metadata"),
+    ),
     "extinction": os.path.join(basedir, "progenitors", "extinction"),
 }
 
@@ -88,7 +99,7 @@ email_msg = EMAIL_MSG_TEMPLATE
 
 def sendEmail(from_addr, to_addr, subj, message, login, password, smtpserver):
 
-    print('Preparing email')
+    logger.info("email: preparing send to %s", to_addr)
 
     msg = MIMEMultipart('alternative')
     msg['Subject'] = subj
@@ -102,21 +113,11 @@ def sendEmail(from_addr, to_addr, subj, message, login, password, smtpserver):
             server.starttls()
             server.login(login, password)
             resp = server.sendmail(from_addr, [to_addr], msg.as_string())
-            print('Send email success: {0}'.format(to_addr))
+            logger.info("email: sent ok to %s", to_addr)
         except Exception as e:
-            print('Send email fail: {0}'.format(to_addr))
-            print('ERROR:',e)
+            logger.error("email: failed to %s: %s", to_addr, e)
 
     return(1)
-
-def is_number(val):
-    try:
-        val = float(val)
-        if np.isnan(float(val)):
-            return(False)
-        return(True)
-    except (ValueError, TypeError):
-        return(False)
 
 def check_dict(dic, keys):
 
@@ -177,9 +178,7 @@ def get_tns_data(row, table=None):
 
     url='https://www.wis-tns.org/api/get/object'
 
-    print(url)
-    print(headers)
-    print(search_data)
+    logger.debug("tns request: %s obj=%s", url, row['Name'])
 
     r = requests.post(url, headers=headers, data=search_data)
 
@@ -201,53 +200,298 @@ def get_tns_data(row, table=None):
 
         return(out)
     else:
-        print(r.status_code)
-        if isinstance(r.content, bytes):
-            print(json.loads(r.content.decode('utf8')))
-        else:
-            print(json.loads(r.content))
+        try:
+            body = json.loads(r.content.decode('utf8') if isinstance(r.content, bytes) else r.content)
+        except (json.JSONDecodeError, ValueError, TypeError):
+            body = r.text[:500] if r.text else ''
+        logger.warning("tns http %s for %s: %s", r.status_code, row['Name'], body)
         time.sleep(60)
 
     return({'error': 'timeout data'})
 
-def import_dustmap():
-    for pole in ['ngp', 'sgp']:
-        datadir=dustmaps.sfd.data_dir()
-        file = os.path.join(datadir, 'sfd',
-            'SFD_dust_4096_{}.fits'.format(pole))
-        if not os.path.exists(file):
-            dustmaps.sfd.fetch()
+
+# Staged bulk CSV archives (TNS Newsfeed): POST + bot/user tns_marker + api_key form field.
+TNS_PUBLIC_OBJECTS_BASE_URL = (
+    "https://www.wis-tns.org/system/files/tns_public_objects"
+)
+
+
+def fetch_tns_public_objects_zip_bytes(
+    filename="tns_public_objects.csv.zip",
+    *,
+    base_url=TNS_PUBLIC_OBJECTS_BASE_URL,
+    timeout=900,
+):
+    """
+    Download a staged TNS public-objects CSV archive (zip).
+
+    Parameters
+    ----------
+    filename : str
+        Archive name under ``.../tns_public_objects/``, e.g.
+        ``tns_public_objects.csv.zip`` (full list) or
+        ``tns_public_objects_YYYYMMDD.csv.zip`` (daily delta).
+    base_url : str
+        Directory URL (no trailing slash required).
+    timeout : float
+        Request timeout in seconds (full list can be tens of MB).
+
+    Returns
+    -------
+    bytes
+        Raw zip payload.
+
+    Notes
+    -----
+    Requires ``TNS_API_KEY``, ``TNS_BOT_ID``, and ``TNS_BOT_NAME`` (same as the
+    Search/Get API). TNS expects ``POST`` with ``User-Agent`` set to the
+    ``tns_marker`` string and ``api_key`` in the POST body.
+    """
+    api_key = (params["tns"]["api_key"] or "").strip()
+    if not api_key:
+        raise ValueError("TNS_API_KEY must be set to download staged TNS CSV archives")
+    bot_id = (params["tns"]["bot_id"] or "").strip()
+    bot_name = (params["tns"]["bot_name"] or "").strip()
+    if not bot_id or not bot_name:
+        raise ValueError(
+            "TNS_BOT_ID and TNS_BOT_NAME must be set for TNS bulk CSV downloads"
+        )
+
+    url = f"{base_url.rstrip('/')}/{filename.lstrip('/')}"
+    headers = get_tns_header()
+    r = requests.post(
+        url,
+        headers=headers,
+        data={"api_key": api_key},
+        timeout=timeout,
+    )
+    r.raise_for_status()
+    data = r.content
+    if len(data) < 4 or data[:2] != b"PK":
+        preview = data[:300].decode("utf-8", errors="replace")
+        raise ValueError(
+            "TNS response is not a zip file (expected PK header). "
+            f"First bytes: {data[:40]!r} … text preview: {preview!r}"
+        )
+    return data
+
+
+def parse_tns_public_objects_zip_bytes(zip_bytes: bytes) -> Table:
+    """
+    Parse a ``tns_public_objects*.csv.zip`` archive into an `~astropy.table.Table`.
+
+    The CSV begins with a date-time header line, then a standard header row
+    (see TNS Newsfeed column list), then data rows.
+    """
+    if len(zip_bytes) < 4 or zip_bytes[:2] != b"PK":
+        raise ValueError("Expected a zip archive (PK header)")
+    bio = io.BytesIO(zip_bytes)
+    with zipfile.ZipFile(bio) as zf:
+        csv_names = [n for n in zf.namelist() if n.lower().endswith(".csv")]
+        if not csv_names:
+            raise ValueError(f"No .csv member in zip; members={zf.namelist()!r}")
+        raw = zf.read(csv_names[0])
+    text = raw.decode("utf-8-sig", errors="replace")
+    lines = text.splitlines()
+    if len(lines) < 2:
+        return Table()
+    body = "\n".join(lines[1:])
+    df = pandas.read_csv(io.StringIO(body), low_memory=False)
+    return Table.from_pandas(df)
+
+
+def fetch_tns_public_objects_table(
+    filename="tns_public_objects.csv.zip",
+    *,
+    base_url=TNS_PUBLIC_OBJECTS_BASE_URL,
+    timeout=900,
+) -> Table:
+    """Download a staged public-objects zip and parse it into a table."""
+    z = fetch_tns_public_objects_zip_bytes(
+        filename=filename, base_url=base_url, timeout=timeout
+    )
+    return parse_tns_public_objects_zip_bytes(z)
+
+
+def normalize_spectral_classification(objtype):
+    """
+    Map a raw TNS/OSC-style type string to the sheet ``Classification`` token.
+
+    Used by ``get_classification`` and by TNS public-catalog crossmatching.
+    """
+    if not objtype:
+        return ""
+    objtype = str(objtype).strip()
+    if not objtype:
+        return ""
+    objtype = objtype.replace("?", "").replace(".", "")
+    if objtype.upper() in [
+        "NOVA",
+        "LBV",
+        "LRN",
+        "CANDIDATE",
+        "ILRT",
+        "LBV TO IIN",
+        "TDE",
+        "FRB",
+        "OTHER",
+        "CV",
+        "VARSTAR",
+    ]:
+        pass
+    elif not objtype.upper().startswith("SN"):
+        objtype = f"SN {objtype}"
+
+    objtype_map = {
+        "SN Ib (Ca rich)": ["SN Ib/Ic (Ca rich)", "SN Ib-Ca-rich"],
+        "SN II-P": ["SN IIP", "SN II P"],
+        "LBV": ["LBV to IIn", "SN IIn/LBV"],
+        "SN Iax": ["SN Ia-02cx", "SN Iax[02cx-like]"],
+    }
+    for key in objtype_map.keys():
+        if objtype in objtype_map[key]:
+            objtype = key
             break
+    return objtype
 
-def get_sfd():
-    return(dustmaps.sfd.SFDQuery())
 
-# Round a floating point number f to n significant digits
-def round_to_n(f, n):
-    code = '%7.{0}f'.format(int(n))
-    val = code % float(f)
-    return(val.strip())
+def _norm_name_key(name):
+    if name is None:
+        return None
+    s = str(name).strip()
+    if not s:
+        return None
+    return re.sub(r"\s+", "", s).upper()
 
-# For an arbitrary input Ra/Dec, output a SkyCoord object
-def parse_coord(ra, dec):
-    def check_coord(ra, dec):
-        if ':' in str(ra) and ':' in str(dec):
-            coord = SkyCoord(ra, dec, unit=(u.hour, u.deg))
-            return(coord)
-        else:
-            try:
-                ra = float(ra) ; dec = float(dec)
-                coord = SkyCoord(ra, dec, unit=(u.deg, u.deg))
-                return(coord)
-            except:
-                return(None)
 
-    if (isinstance(ra, (list, np.ndarray, Column)) and
-        isinstance(dec, (list, np.ndarray, Column))):
-        coords = np.array([check_coord(r,d) for r, d in zip(ra, dec)])
-        return(coords)
+def _sheet_name_lookup_keys(sheet_name):
+    """Keys shared with TNS ``name`` / ``internal_names`` indexing."""
+    if not sheet_name or not str(sheet_name).strip():
+        return []
+    name = str(sheet_name).strip()
+    if is_number(name[0]):
+        variants = [f"SN{name}", f"AT{name}", name]
     else:
-        return(check_coord(ra, dec))
+        variants = [name, f"SN{name}", f"AT{name}"]
+    out = []
+    seen = set()
+    for v in variants:
+        k = _norm_name_key(v)
+        if k and k not in seen:
+            seen.add(k)
+            out.append(k)
+    return out
+
+
+def _tns_type_blank(typ):
+    if typ is None:
+        return True
+    try:
+        if isinstance(typ, float) and np.isnan(typ):
+            return True
+    except (TypeError, ValueError):
+        pass
+    try:
+        if hasattr(typ, "item") and isinstance(typ.item(), float):
+            if np.isnan(typ.item()):
+                return True
+    except (ValueError, TypeError, AttributeError):
+        pass
+    return not str(typ).strip()
+
+
+def prepare_tns_public_crossmatch(tns_table):
+    """
+    Build a name lookup from the TNS public-objects table (``name`` and
+    ``internal_names`` only; no sky matching).
+
+    Returns
+    -------
+    dict
+        Normalized name key -> raw TNS ``type`` string.
+    """
+    if tns_table is None or len(tns_table) == 0:
+        return {}
+
+    col = {c.lower(): c for c in tns_table.colnames}
+    for required in ("name", "type"):
+        if required not in col:
+            raise ValueError(
+                f"TNS public table missing {required!r} column; have {tns_table.colnames!r}"
+            )
+
+    name_c = col["name"]
+    type_c = col["type"]
+    int_c = col.get("internal_names")
+
+    lookup = {}
+
+    for row in tns_table:
+        typ = row[type_c]
+        if _tns_type_blank(typ):
+            continue
+        typ_str = str(typ).strip()
+
+        names_to_index = [row[name_c]]
+        if int_c:
+            internals = row[int_c]
+            if internals is not None and str(internals).strip():
+                for part in str(internals).split(","):
+                    p = part.strip()
+                    if p:
+                        names_to_index.append(p)
+
+        for nm in names_to_index:
+            k = _norm_name_key(nm)
+            if k:
+                lookup[k] = typ_str
+
+    return lookup
+
+
+def _set_tns_bulk_meta(meta, objname, raw_tns_type):
+    """Attach TNS object type from bulk catalog so later ``get_classification`` agrees."""
+    if objname not in meta:
+        meta[objname] = {}
+    meta[objname].setdefault("tns", {})
+    meta[objname]["tns"]["object_type"] = {"name": str(raw_tns_type).strip()}
+
+
+def apply_tns_public_catalog_to_sndata(sndata, tns_table):
+    """
+    Crossmatch sheet transients to the TNS public-objects catalog by **name**
+    only (``name`` and ``internal_names`` in the catalog vs sheet ``Name``),
+    and set ``Classification`` (and per-object ``meta`` TNS type) from the TNS
+    ``type`` field.
+    """
+    lookup = prepare_tns_public_crossmatch(tns_table)
+    if not lookup:
+        logger.warning("TNS public catalog crossmatch: empty name lookup")
+        return
+
+    n_name = 0
+
+    for _tab_key, table in sndata.items():
+        if "Name" not in table.colnames or "Classification" not in table.colnames:
+            continue
+
+        for i in range(len(table)):
+            raw_match = None
+            for lk in _sheet_name_lookup_keys(table["Name"][i]):
+                if lk in lookup:
+                    raw_match = lookup[lk]
+                    break
+            if raw_match is None:
+                continue
+            cls = normalize_spectral_classification(raw_match)
+            if not cls:
+                continue
+            table["Classification"][i] = cls
+            _set_tns_bulk_meta(table.meta, table["Name"][i], raw_match)
+            n_name += 1
+
+    logger.info("TNS public catalog applied: %d name match(es)", n_name)
+
 
 def get_coord(row):
 
@@ -301,10 +545,10 @@ def get_yse_data(row, table=None):
         if r.status_code==200:
             out['url']=page
     except requests.exceptions.ReadTimeout:
-        print('Timeout on YSE page for: {0}'.format(row['Name']))
+        logger.warning("yse page timeout: %s", row['Name'])
         return({'error': 'timeout data'})
     except requests.exceptions.ConnectionError:
-        print('Connection error on YSE page for: {0}'.format(row['Name']))
+        logger.warning("yse page connection error: %s", row['Name'])
         return({'error': 'timeout data'})
 
     return(out)
@@ -313,11 +557,11 @@ def get_yse_data(row, table=None):
         r = requests.get(url, auth=(user, password), timeout=90)
     except requests.exceptions.ReadTimeout:
         out['error']='timeout data'
-        print('Timeout on YSE data for: {0}'.format(row['Name']))
+        logger.warning("yse data timeout: %s", row['Name'])
         return(out)
     except requests.exceptions.ConnectionError:
         out['error']='timeout data'
-        print('Connection error on YSE page for: {0}'.format(row['Name']))
+        logger.warning("yse data connection error: %s", row['Name'])
         return(out)
 
     if r.status_code==200:
@@ -515,6 +759,83 @@ def get_jwst_data(row, table=None):
     else:
         return({'data': productlist})
 
+
+def _osc_github_repo_list(disc_year):
+    """
+    Year-bucket repo names on github.com/astrocatalogs for Open Supernova Catalog JSON.
+
+    Individual events live in these repos; sne.space mirroring is no longer reliable.
+    """
+    if disc_year < 1990:
+        primary = 'sne-pre-1990'
+    elif disc_year < 2000:
+        primary = 'sne-1990-1999'
+    elif disc_year < 2005:
+        primary = 'sne-2000-2004'
+    elif disc_year < 2010:
+        primary = 'sne-2005-2009'
+    elif disc_year < 2015:
+        primary = 'sne-2010-2014'
+    elif disc_year < 2020:
+        primary = 'sne-2015-2019'
+    else:
+        primary = 'sne-2020-2024'
+    return [primary, 'sne-boneyard']
+
+
+def _osc_fetch_event_json(objname, repo_list, timeout=60):
+    """
+    Load one OSC JSON object from astrocatalogs/* GitHub raw URLs.
+
+    Returns
+    -------
+    tuple
+        (inner_event_dict, url) or (None, None) if not found / network error.
+    """
+    for lt in repo_list:
+        for branch in ('master', 'main'):
+            url = ('https://raw.githubusercontent.com/astrocatalogs/{0}/{1}/{2}.json'
+                   .format(lt, branch, objname))
+            try:
+                r = requests.get(url, timeout=timeout)
+            except requests.RequestException:
+                continue
+            if r.status_code != 200:
+                continue
+            try:
+                payload = json.loads(r.content)
+            except (json.JSONDecodeError, ValueError):
+                continue
+            if objname not in payload:
+                continue
+            return payload[objname], url
+    return None, None
+
+
+def _parse_osc_discoverdate(val):
+    """
+    Parse Open Supernova Catalog discoverdate value for astropy Time.
+
+    OSC JSON sometimes has year-only strings (e.g. ``'2014'``), which Time()
+    cannot infer without an explicit format.
+    """
+    if val is None:
+        return None
+    s = str(val).strip().replace('/', '-')
+    if not s:
+        return None
+    try:
+        return Time(s)
+    except (ValueError, TypeError):
+        pass
+    if re.fullmatch(r'\d{4}', s):
+        try:
+            return Time(s + '-01-01')
+        except (ValueError, TypeError):
+            return None
+    return None
+
+
 def get_osc_data(row, table=None):
 
     output = {'url':None, 'json': None,
@@ -547,64 +868,25 @@ def get_osc_data(row, table=None):
         return(output)
 
     disc_year = float(t.datetime.strftime('%Y'))
-    list_tries = []
-    if disc_year < 1990:
-        list_tries.append('sne-pre-1990')
-    elif disc_year < 2000:
-        list_tries.append('sne-1990-1999')
-    elif disc_year < 2005:
-        list_tries.append('sne-2000-2004')
-    elif disc_year < 2010:
-        list_tries.append('sne-2005-2009')
-    elif disc_year < 2015:
-        list_tries.append('sne-2010-2014')
-    elif disc_year < 2020:
-        list_tries.append('sne-2015-2019')
-    else:
-        list_tries.append('sne-2020-2024')
-
-    list_tries.append('sne-boneyard')
-
+    list_tries = _osc_github_repo_list(disc_year)
 
     for objname in tries:
         if 'ASASSN' in objname and 'ASASSN-' not in objname:
             objname = objname.replace('ASASSN','ASASSN-')
 
-        r=None
-        for lt in list_tries:
-            url=f'https://raw.githubusercontent.com/astrocatalogs/{lt}/master/{objname}.json'
-            try:
-                r = requests.get(url)
-                break
-            except requests.exceptions.ConnectionError:
-                url=f'https://raw.githubusercontent.com/astrocatalogs/{lt}/main/{objname}.json'
-                try:
-                    r = requests.get(url)
-                    break
-                except requests.exceptions.ConnectionError:
-                    pass
-
-        if r is not None and r.status_code==200:
-            try:
-                data = json.loads(r.content)
-            except json.decoder.JSONDecodeError:
-                return(output)
-
-            data = data[objname]
-            output['url']=url
+        data, url = _osc_fetch_event_json(objname, list_tries)
+        if data is not None:
+            output['url'] = url
 
             if 'alias' in data.keys():
                 for alias in data['alias']:
-                    val=alias['value']
-                    newurl='https://sne.space/astrocats/astrocats/supernovae/output/json/'
-                    newurl+=val+'.json'
-                    r = requests.get(newurl)
-                    if r.status_code==200:
-                        newdata = json.loads(r.content)
-                        newdata = newdata[val]
-                        if len(newdata.keys())>len(data.keys()):
-                            daturl=newurl
-                        data.update(newdata)
+                    val = alias['value']
+                    if val == objname:
+                        continue
+                    newdata, _ = _osc_fetch_event_json(val, list_tries)
+                    if newdata is None:
+                        continue
+                    data.update(newdata)
 
             # Split off relevant metadata into a single dictionary
             if 'photometry' in data.keys():
@@ -627,9 +909,10 @@ def get_osc_data(row, table=None):
                 output['photometry'] = table
 
             if 'discoverdate' in data.keys():
-                t = Time(data['discoverdate'][0]['value'].replace('/','-'))
-                date_str = t.datetime.strftime('%Y-%m-%d %H:%M:%S')
-                output['discovery_date'] = date_str
+                t_osc = _parse_osc_discoverdate(data['discoverdate'][0].get('value'))
+                if t_osc is not None:
+                    date_str = t_osc.datetime.strftime('%Y-%m-%d %H:%M:%S')
+                    output['discovery_date'] = date_str
 
             if 'redshift' in data.keys():
                 output['redshift'] = data['redshift'][0]['value']
@@ -681,91 +964,57 @@ def get_classification(row, table=None):
         tns_class = tns_class.strip()
         objtype = tns_class
 
-    objtype = objtype.replace('?','')
-    objtype = objtype.replace('.','')
-
-
-
-    if objtype:
-        if objtype.upper() in ['NOVA','LBV','LRN','CANDIDATE','ILRT',
-            'LBV TO IIN','TDE','FRB','OTHER','CV','VARSTAR']:
-            objtype=objtype
-        elif not objtype.upper().startswith('SN'):
-            objtype = f'SN {objtype}'
-
-        objtype_map = {'SN Ib (Ca rich)': ['SN Ib/Ic (Ca rich)',
-                                           'SN Ib-Ca-rich'],
-                       'SN II-P': ['SN IIP','SN II P'],
-                       'LBV': ['LBV to IIn','SN IIn/LBV'],
-                       'SN Iax': ['SN Ia-02cx','SN Iax[02cx-like]'],}
-
-        for key in objtype_map.keys():
-            if objtype in objtype_map[key]:
-                objtype = key
-                break
-
-        return(objtype)
-
-    return('')
+    return normalize_spectral_classification(objtype)
 
 def get_classification_mask(table):
 
     if 'Classification' not in table.keys():
         return(None)
 
-    class_mask = []
-    for row in table:
-        if row['Classification'].upper() in ['CANDIDATE','NOVA','SN','',
-            'CV','VARSTAR','OTHER']:
-            class_mask.append(True)
-        elif not row['Classification'].strip():
-            class_mask.append(True)
+    # Single pass: previously this scanned the table four times (very slow for
+    # >1k rows) calling get_hst_pre / get_redshift / get_best_distance per row each time.
+    loose_class = frozenset(
+        ['CANDIDATE', 'NOVA', 'SN', '', 'CV', 'VARSTAR', 'OTHER']
+    )
+    n = len(table)
+    class_m = np.zeros(n, dtype=bool)
+    pre_m = np.zeros(n, dtype=bool)
+    rz_m = np.zeros(n, dtype=bool)
+    dist_m = np.zeros(n, dtype=bool)
+
+    for i, row in enumerate(table):
+        cls = row['Classification']
+        cls_s = str(cls) if cls is not None else ''
+        cu = cls_s.upper()
+        if cu in loose_class or not cls_s.strip():
+            class_m[i] = True
         else:
-            class_mask.append(False)
+            class_m[i] = False
 
-    class_mask = np.array(class_mask)
-
-    pre_exp_mask = []
-    for row in table:
         exptime = get_hst_pre(row, table=table)
-        if not exptime or float(exptime)==0.0 or np.isnan(float(exptime)):
-            pre_exp_mask.append(True)
+        if not exptime or float(exptime) == 0.0 or np.isnan(float(exptime)):
+            pre_m[i] = True
         else:
-            pre_exp_mask.append(False)
+            pre_m[i] = False
 
-    pre_exp_mask = np.array(pre_exp_mask)
-
-    redshift_mask = []
-    for row in table:
         redshift = get_redshift(row, table=table)
-        if not redshift:
-            redshift_mask.append(True)
-        elif not is_number(redshift):
-            redshift_mask.append(True)
-        elif float(redshift)>0.02:
-            redshift_mask.append(True)
+        if not redshift or not is_number(redshift) or float(redshift) > 0.02:
+            rz_m[i] = True
         else:
-            redshift_mask.append(False)
+            rz_m[i] = False
 
-    redshift_mask = np.array(redshift_mask)
-
-    distance_mask = []
-    for row in table:
         output = get_best_distance(row, table=table)
-        if ('distance' not in output.keys() or
-            'distance_error' not in output.keys()):
-            distance_mask.append(True)
-        elif float(output['distance'])-float(output['distance_error'])>80.0:
-            distance_mask.append(True)
+        if (
+            'distance' not in output.keys()
+            or 'distance_error' not in output.keys()
+        ):
+            dist_m[i] = True
+        elif float(output['distance']) - float(output['distance_error']) > 80.0:
+            dist_m[i] = True
         else:
-            distance_mask.append(False)
+            dist_m[i] = False
 
-    distance_mask = np.array(distance_mask)
-
-
-    mask = class_mask | pre_exp_mask | redshift_mask | distance_mask
-
-    return(mask)
+    return class_m | pre_m | rz_m | dist_m
 
 
 def get_ads_data(row, table=None):
@@ -821,7 +1070,7 @@ def get_host_distance(row, table=None):
     try:
         r = requests.get(url)
     except requests.exceptions.ConnectionError:
-        print('Connection error for: {0}'.format(row['Name']))
+        logger.warning("ned distance connection error: %s", row['Name'])
         return({})
 
     if r.status_code==200:
@@ -1025,7 +1274,7 @@ def add_yse_targets(sndata, yse_sql_query='160'):
 
         sndata[add_key].add_row(new_row)
 
-    print(f'{new_targets} total new targets to add')
+    logger.info("yse: %d new target(s) merged into sheets", new_targets)
 
     return(sndata)
 
@@ -1060,8 +1309,7 @@ def add_metadata(table, method, redo=False, redo_obj=None):
         table.meta['jwst']=None
 
     if method not in get_metadata.keys():
-        warning = 'WARNING: bad metadata method {0}'
-        print(warning.format(method))
+        logger.warning("metadata: unknown method %r", method)
         return(table)
 
     if redo_obj is not None:
@@ -1072,38 +1320,38 @@ def add_metadata(table, method, redo=False, redo_obj=None):
     objs = list(table.meta.keys())
 
     orig_redo = copy.copy(redo)
+    n_fetch = 0
     for row in table:
         redo = copy.copy(orig_redo)
 
-        if row['Name'] in redo_obj: redo = True
-
-        print('Getting {0} data for {1}, redo={2}'.format(method, row['Name'],
-            redo))
+        if row['Name'] in redo_obj:
+            redo = True
 
         if row['Name'] not in objs:
             redo = True
-            # Initialize dictionary
-            table.meta[row['Name']]={}
-            print('No name')
+            table.meta[row['Name']] = {}
+            logger.debug("metadata %s: new cache entry for %s", method, row['Name'])
         elif method not in table.meta[row['Name']].keys():
             redo = True
-            print(f'{method}, No method')
+            logger.debug("metadata %s: missing key for %s", method, row['Name'])
         elif (table.meta[row['Name']][method] is None or
-              table.meta[row['Name']][method]=={}):
+              table.meta[row['Name']][method] == {}):
             redo = True
-            print(f'Method {method} is None')
+            logger.debug("metadata %s: empty cache for %s", method, row['Name'])
         elif ('error' in table.meta[row['Name']][method].keys() and
-            (table.meta[row['Name']][method]['error'] in ['timeout',
-                'timeout data', 403, 'bad dict'])):#,'no candidates'])):
-            # Add back in no candidates for testing host association methods
-            # on the Glade catalog (or if a more complete catalog is added)
+              (table.meta[row['Name']][method]['error'] in ['timeout',
+                  'timeout data', 403, 'bad dict'])):
             redo = True
-            print('Error',method,table.meta[row['Name']][method])
+            logger.debug("metadata %s: retry after error for %s (%s)", method,
+                         row['Name'], table.meta[row['Name']][method].get('error'))
 
         if redo:
-            print('Redoing (or doing, whatever)...')
+            logger.debug("metadata %s: fetch %s", method, row['Name'])
             metadata = get_metadata[method](row, table=table)
-            table.meta[row['Name']][method]=metadata
+            table.meta[row['Name']][method] = metadata
+            n_fetch += 1
+
+    logger.info("metadata %s: %d rows, %d fetches", method, len(table), n_fetch)
 
     return(table)
 
@@ -1299,21 +1547,26 @@ def gather_type(sndata, sn_type):
         if key in sndata[sn_type].meta.keys():
             new_table.meta[key] = sndata[sn_type].meta[key]
 
-    acceptable_types = type_index[sn_type]+['Candidate','']
+    names_in_new = set()
+    acceptable_types = frozenset(type_index[sn_type] + ['Candidate', ''])
     for row in sndata[sn_type]:
         if str(row['Classification']) in acceptable_types:
-            if row['Name'] not in new_table['Name']:
+            nm = row['Name']
+            if nm not in names_in_new:
                 new_table.add_row(row)
-                new_table.meta[row['Name']]=sndata[sn_type].meta[row['Name']]
+                new_table.meta[nm] = sndata[sn_type].meta[nm]
+                names_in_new.add(nm)
 
-    acceptable_types = type_index[sn_type]
+    acceptable_types = frozenset(type_index[sn_type])
     for typ in sndata.keys():
         if typ==sn_type: continue
         for row in sndata[typ]:
             if row['Classification'] in acceptable_types:
-                if row['Name'] not in new_table['Name']:
+                nm = row['Name']
+                if nm not in names_in_new:
                     new_table.add_row(row)
-                    new_table.meta[row['Name']]=sndata[typ].meta[row['Name']]
+                    new_table.meta[nm] = sndata[typ].meta[nm]
+                    names_in_new.add(nm)
 
     return(new_table)
 
@@ -1461,7 +1714,7 @@ def get_productlist(coord, search_radius, obstype='HST',
         requests.exceptions.HTTPError):
         error = 'ERROR: MAST is not working currently working\n'
         error += 'Try again later...'
-        print(error)
+        logger.warning("mast: query_region failed; %s", error.replace('\n', ' '))
         return(productlist)
 
     # Get rid of all masked rows (they aren't HST data anyway)
@@ -1506,7 +1759,7 @@ def get_productlist(coord, search_radius, obstype='HST',
         except:
             error = 'ERROR: MAST is not working currently working\n'
             error += 'Try again later...'
-            print(error)
+            logger.warning("mast: get_product_list failed; %s", error.replace('\n', ' '))
             return(productlist)
 
         instrument = obs['instrument_name']
@@ -1560,9 +1813,8 @@ def get_productlist(coord, search_radius, obstype='HST',
                         try:
                             productlist.add_row(prod)
                         except ValueError:
-                            print(prod)
-                            print(productlist)
-                            print(productlist.keys())
+                            logger.error("mast HST row mismatch prod=%s table_cols=%s",
+                                         prod, list(productlist.colnames) if productlist is not None else None)
                             raise Exception('Mismatch between row and table!')
 
             elif obstype=='JWST':
@@ -1577,9 +1829,8 @@ def get_productlist(coord, search_radius, obstype='HST',
                     try:
                         productlist.add_row(prod)
                     except ValueError:
-                        print(prod)
-                        print(productlist)
-                        print(productlist.keys())
+                        logger.error("mast JWST row mismatch prod=%s table_cols=%s",
+                                     prod, list(productlist.colnames) if productlist is not None else None)
                         raise Exception('Mismatch between row and table!')
 
     if not productlist:

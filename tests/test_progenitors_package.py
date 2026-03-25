@@ -11,13 +11,10 @@ def test_package_import():
 
 
 def test_version_format():
-    """Dynamic version is set and has form x.y or x.y.z (single source: _version.py)."""
+    """Version string is non-empty (importlib, git describe, or fallback)."""
     from progenitors import __version__
     assert isinstance(__version__, str)
-    assert len(__version__) >= 3
-    parts = __version__.split(".")
-    assert len(parts) >= 2
-    assert all(p and p[0].isdigit() for p in parts)
+    assert len(__version__) >= 1
 
 
 def test_params_from_init():

@@ -7,6 +7,7 @@ messages if required variables are missing.
 
 Settings: env var names and descriptions live in progenitors/settings/env_config.py
 """
+import logging
 import os
 import sys
 
@@ -15,6 +16,8 @@ from .settings.env_config import (
     ENV_DESCRIPTIONS,
     ENV_EXAMPLE_SCRIPT,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def get_env(key, default=""):
@@ -52,12 +55,14 @@ def validate_env(features, credentials_path=None):
         lines.append("Set them in your shell or use the example script:")
         lines.append(f"  {ENV_EXAMPLE_SCRIPT}")
         lines.append("")
-        print("\n".join(lines))
+        logger.error("%s", "\n".join(lines))
         sys.exit(1)
 
     if "sheets" in features and credentials_path and not os.path.isfile(credentials_path):
-        print(
-            f"Google Sheets credentials file not found: {credentials_path}\n"
-            "Download from Google Cloud Console and place at repo root, or set PROGENITORS_CREDENTIALS_PATH."
+        logger.error(
+            "Google Sheets credentials file not found: %s. "
+            "Download from Google Cloud Console and place at repo root, or set "
+            "PROGENITORS_CREDENTIALS_PATH.",
+            credentials_path,
         )
         sys.exit(1)

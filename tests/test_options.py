@@ -45,11 +45,24 @@ def test_parse_arguments_defaults(monkeypatch):
     assert args.redo is False
     assert args.alert is False
     assert args.update_classification is False
+    assert args.update_tns_class is False
+    assert args.log_level is None
+    assert args.profile is False
+
+
+def test_parse_arguments_profile(monkeypatch):
+    import sys
+    monkeypatch.setattr(sys, "argv", ["progenitors", "--profile"])
+    from progenitors.options import parse_arguments
+    args = parse_arguments()
+    assert args.profile is True
 
 
 def test_message(capsys):
+    from progenitors.pipeline_logging import setup_pipeline_logging
     from progenitors.options import message
+
+    setup_pipeline_logging("INFO")
     message("hello")
-    out, _ = capsys.readouterr()
-    assert "hello" in out
-    assert "#" in out
+    _, err = capsys.readouterr()
+    assert "hello" in err
