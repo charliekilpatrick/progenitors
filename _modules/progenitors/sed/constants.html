@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../../../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>progenitors.sed.constants &#8212; progenitors 0.1.0+gb7985d6.dirty documentation</title>
+    <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/basic.css?v=b08954a9" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/alabaster.css?v=27fed22d" />
+    <script src="../../../_static/documentation_options.js?v=7a246dcd"></script>
+    <script src="../../../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <h1>Source code for progenitors.sed.constants</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">SED plotting and fitting constants.</span>
+
+<span class="sd">Includes colors (RGB tuples), physical constants (e.g. SOLAR_LUM_CGS, BB_SCALE),</span>
+<span class="sd">dust/RSG scaling constants, and alternate column names for photometry tables.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">astropy</span><span class="w"> </span><span class="kn">import</span> <span class="n">units</span> <span class="k">as</span> <span class="n">u</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">astropy.constants</span><span class="w"> </span><span class="kn">import</span> <span class="n">astropyconst20</span> <span class="k">as</span> <span class="n">const</span>
+
+
+<div class="viewcode-block" id="color">
+<a class="viewcode-back" href="../../../sed.html#progenitors.sed.constants.color">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">color</span><span class="p">(</span><span class="n">r</span><span class="p">,</span> <span class="n">g</span><span class="p">,</span> <span class="n">b</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Convert 0-255 RGB to (r, g, b, 1.0) tuple for matplotlib.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    r, g, b : int or float</span>
+<span class="sd">        Red, green, blue in [0, 255].</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    tuple</span>
+<span class="sd">        (r/255, g/255, b/255, 1.0).</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="p">(</span><span class="n">r</span> <span class="o">/</span> <span class="mf">255.0</span><span class="p">,</span> <span class="n">g</span> <span class="o">/</span> <span class="mf">255.0</span><span class="p">,</span> <span class="n">b</span> <span class="o">/</span> <span class="mf">255.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">)</span></div>
+
+
+<span class="n">black</span><span class="o">=</span><span class="n">color</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span><span class="mi">0</span><span class="p">,</span><span class="mi">0</span><span class="p">)</span>
+<span class="n">red</span><span class="o">=</span><span class="n">color</span><span class="p">(</span><span class="mi">255</span><span class="p">,</span><span class="mi">0</span><span class="p">,</span><span class="mi">0</span><span class="p">)</span>
+<span class="n">blue</span><span class="o">=</span><span class="n">color</span><span class="p">(</span><span class="mi">10</span><span class="p">,</span><span class="mi">0</span><span class="p">,</span><span class="mi">255</span><span class="p">)</span>
+<span class="n">green</span><span class="o">=</span><span class="n">color</span><span class="p">(</span><span class="mi">12</span><span class="p">,</span><span class="mi">83</span><span class="p">,</span><span class="mi">0</span><span class="p">)</span>
+<span class="n">magenta</span><span class="o">=</span><span class="n">color</span><span class="p">(</span><span class="mi">204</span><span class="p">,</span><span class="mi">0</span><span class="p">,</span><span class="mi">204</span><span class="p">)</span>
+<span class="n">goldenrod</span><span class="o">=</span><span class="n">color</span><span class="p">(</span><span class="mi">239</span><span class="p">,</span><span class="mi">139</span><span class="p">,</span><span class="mi">8</span><span class="p">)</span>
+<span class="n">orange</span><span class="o">=</span><span class="n">color</span><span class="p">(</span><span class="mi">204</span><span class="p">,</span><span class="mi">102</span><span class="p">,</span><span class="mi">0</span><span class="p">)</span>
+<span class="n">lightred</span><span class="o">=</span><span class="n">color</span><span class="p">(</span><span class="mi">255</span><span class="p">,</span><span class="mi">178</span><span class="p">,</span><span class="mi">178</span><span class="p">)</span>
+
+<span class="n">palette</span> <span class="o">=</span> <span class="p">[</span><span class="n">red</span><span class="p">,</span><span class="n">orange</span><span class="p">,</span><span class="n">goldenrod</span><span class="p">,</span><span class="n">green</span><span class="p">,</span><span class="n">blue</span><span class="p">,</span><span class="n">magenta</span><span class="p">]</span>
+
+<span class="n">SOLAR_LUM_CGS</span> <span class="o">=</span> <span class="n">u</span><span class="o">.</span><span class="n">solLum</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">u</span><span class="o">.</span><span class="n">erg</span><span class="o">/</span><span class="n">u</span><span class="o">.</span><span class="n">second</span><span class="p">)</span>
+
+<span class="c1"># Convert normalized blackbody (synphot) to solar luminosity flux units</span>
+<span class="n">BB_SCALE</span> <span class="o">=</span> <span class="mf">1.1483949e19</span>
+
+<span class="c1"># Converts pickles spectrum normalized to 1 to solar luminosity flux units</span>
+<span class="n">PICKLES_CONST</span> <span class="o">=</span> <span class="mf">3.08397467e-7</span>
+
+<span class="c1"># Constant to scale 4*pi*tauV/kappaV*R_in * R_out to Msun with kappaV in cm2/g,</span>
+<span class="c1"># Rin and Rout in Rsun.  See run_emcee in analysis.py.</span>
+<span class="c1"># This is essentially R_sun^2 * 1 cm^2/gram / (1 M_sun)</span>
+<span class="n">DUST_BB_MASS</span> <span class="o">=</span> <span class="mf">2.4319771e-12</span>
+
+<span class="c1"># Constant to scale 4*pi*tau_V/kappa_V*R_in * v_wind to Msun/yr with kappa_V in</span>
+<span class="c1"># cm2/g, Rin in Rsun, vwind in km/s.</span>
+<span class="c1"># This is essentially (R_sun * 1 km/s) / (1 Msun/yr * 1 cm2/g)</span>
+<span class="n">d</span><span class="o">=</span><span class="n">const</span><span class="o">.</span><span class="n">R_sun</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="s1">&#39;cm&#39;</span><span class="p">)</span> <span class="o">*</span> <span class="mf">1.0</span> <span class="o">*</span> <span class="n">u</span><span class="o">.</span><span class="n">km</span><span class="o">/</span><span class="n">u</span><span class="o">.</span><span class="n">s</span> <span class="o">/</span> <span class="p">(</span><span class="n">const</span><span class="o">.</span><span class="n">M_sun</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="s1">&#39;g&#39;</span><span class="p">)</span> <span class="o">/</span> <span class="p">(</span><span class="mf">1.0</span> <span class="o">*</span> <span class="n">u</span><span class="o">.</span><span class="n">year</span><span class="p">)</span> <span class="o">*</span> <span class="mf">1.0</span> <span class="o">*</span> <span class="n">u</span><span class="o">.</span><span class="n">cm</span><span class="o">**</span><span class="mi">2</span><span class="o">/</span><span class="n">u</span><span class="o">.</span><span class="n">g</span><span class="p">)</span>
+<span class="n">DUST_BB_WIND</span> <span class="o">=</span> <span class="n">d</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">u</span><span class="o">.</span><span class="n">Unit</span><span class="p">(</span><span class="mi">1</span><span class="p">))</span><span class="o">.</span><span class="n">value</span>
+
+<span class="c1"># 50km/s is default</span>
+<span class="n">RSG_V_WIND</span> <span class="o">=</span> <span class="mf">50.0</span> <span class="o">*</span> <span class="n">u</span><span class="o">.</span><span class="n">km</span><span class="o">/</span><span class="n">u</span><span class="o">.</span><span class="n">s</span>
+
+<span class="n">FIGSIZE</span> <span class="o">=</span> <span class="mf">10.0</span>
+
+<span class="c1"># Alternate names for phottable on input</span>
+<span class="n">alternate_names</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s1">&#39;magnitude&#39;</span><span class="p">:</span> <span class="p">[</span><span class="s1">&#39;mag&#39;</span><span class="p">,</span><span class="s1">&#39;m&#39;</span><span class="p">],</span>
+    <span class="s1">&#39;mag_err&#39;</span><span class="p">:</span> <span class="p">[</span><span class="s1">&#39;magerr&#39;</span><span class="p">,</span><span class="s1">&#39;err&#39;</span><span class="p">,</span><span class="s1">&#39;error&#39;</span><span class="p">,</span><span class="s1">&#39;uncertainty&#39;</span><span class="p">],</span>
+    <span class="s1">&#39;filter&#39;</span><span class="p">:</span> <span class="p">[</span><span class="s1">&#39;band&#39;</span><span class="p">,</span><span class="s1">&#39;bandpass&#39;</span><span class="p">,</span><span class="s1">&#39;filt&#39;</span><span class="p">],</span>
+    <span class="s1">&#39;instrument&#39;</span><span class="p">:</span> <span class="p">[</span><span class="s1">&#39;inst&#39;</span><span class="p">,</span><span class="s1">&#39;detector&#39;</span><span class="p">,</span><span class="s1">&#39;det&#39;</span><span class="p">]</span>
+<span class="p">}</span>
+
+<span class="n">color_palette</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s1">&#39;WFC3_UVIS_F438W&#39;</span><span class="p">:</span> <span class="n">blue</span><span class="p">,</span>
+    <span class="s1">&#39;WFC3_UVIS_F555W&#39;</span><span class="p">:</span> <span class="n">green</span><span class="p">,</span>
+    <span class="s1">&#39;WFC3_UVIS_F625W&#39;</span><span class="p">:</span> <span class="n">goldenrod</span><span class="p">,</span>
+    <span class="s1">&#39;WFC3_UVIS_F814W&#39;</span><span class="p">:</span> <span class="n">red</span>
+<span class="p">}</span>
+</pre></div>
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h3><a href="../../../index.html">Table of Contents</a></h3>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../sed.html">SED module (progenitors.sed)</a></li>
+</ul>
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../index.html">Documentation overview</a><ul>
+  <li><a href="../../index.html">Module code</a><ul>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+<search id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;Progenitors package authors.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 9.1.0</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+    </div>
+
+    
+
+    
+  </body>
+</html>
