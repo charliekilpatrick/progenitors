@@ -13,6 +13,7 @@ dependencies = [
     "numpy",
     "requests",
     "pandas",
+    "zstandard>=0.22",
     "astroquery",
     "dustmaps",
     "google-api-python-client",

@@ -1,10 +1,18 @@
 .venv/
 .coverage
 dist/
+
+# Google OAuth client secrets and user token (repo root); never commit
+credentials.json
+token.pickle
 progenitors/simulation/
 *.egg-info/
 *.egg/
 metadata/*
+# Local pipeline cache (per-sheet Astropy Table .meta); see progenitors/metadata/README.md
+progenitors/metadata/*.pkl
+progenitors/metadata/*.pkl.zst
+progenitors/metadata/backup/
 sed/data/bpass/z*
 sed/data/mist/
 sed/data/backends/

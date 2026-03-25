@@ -14,6 +14,14 @@ def test_get_env():
         del os.environ["_TEST_PROGENITORS_VAR"]
 
 
+def test_alert_reclassification_sheet_keys():
+    from progenitors.settings.pipeline import ALERT_RECLASSIFICATION_SHEET_KEYS
+
+    assert "Type Ia" in ALERT_RECLASSIFICATION_SHEET_KEYS
+    assert "Type II-P/II-L" in ALERT_RECLASSIFICATION_SHEET_KEYS
+    assert len(ALERT_RECLASSIFICATION_SHEET_KEYS) == 5
+
+
 def test_env_by_feature():
     from progenitors.env_config import ENV_BY_FEATURE
     assert "sheets" in ENV_BY_FEATURE
@@ -26,13 +34,14 @@ def test_env_by_feature():
 
 def test_validate_env_missing_exits(capsys, monkeypatch):
     from progenitors.env_config import validate_env
-    # Ensure var is missing
+
     monkeypatch.delenv("PROGENITORS_SHEET", raising=False)
     with pytest.raises(SystemExit):
         validate_env(["sheets"])
-    out, _ = capsys.readouterr()
-    assert "PROGENITORS_SHEET" in out
-    assert "Missing" in out or "required" in out.lower()
+    out, err = capsys.readouterr()
+    blob = out + err
+    assert "PROGENITORS_SHEET" in blob
+    assert "Missing" in blob or "required" in blob.lower()
 
 
 def test_validate_env_sheets_ok_when_set(tmp_path, monkeypatch):

@@ -53,9 +53,17 @@ Credentials and API keys use **environment variables** only. See `progenitors.en
 | TNS          | `TNS_API_KEY`, `TNS_BOT_NAME`, `TNS_BOT_ID`                       |
 | ADS          | `ADS_AUTHCODE`                                                    |
 | Email alerts | `GMAIL_LOGIN`, `GMAIL_PASSWORD`, `MY_EMAIL`                       |
+| Pipeline log level | `PROGENITORS_LOG_LEVEL` (`DEBUG`, `INFO`, `WARNING`, `ERROR`; default `INFO`) or CLI `--log-level`. Set `NO_COLOR=1` to disable ANSI colors. |
+| Metadata compression | `PROGENITORS_METADATA_ZSTD_LEVEL` — zstd level for `.pkl.zst` cache (default `1` = fast; use `3`–`6` for smaller files). |
+| Metadata fsync | `PROGENITORS_METADATA_FSYNC=0` — skip `fsync` after metadata writes (faster on cloud folders; slightly less crash-safe). |
+| Metadata cache directory | `PROGENITORS_METADATA_DIR` — override cache path (use a local SSD path for faster load/save than cloud-synced folders). |
+| Corrupt main cache | `PROGENITORS_METADATA_QUARANTINE_CORRUPT=0` — do not rename a bad `*.pkl.zst` to `*.corrupt` after loading from backup (default is to quarantine). |
+| Google Sheets writes | `PROGENITORS_SHEETS_WRITE_INTERVAL` — minimum seconds between write calls (default `1.05`, ~60/min quota). Retries with backoff on HTTP 429/503. |
 
 
 Example: `cp progenitors/scripts/set_env_example.sh my_env.sh`, edit, then `source my_env.sh`.
+
+Pipeline logs go to **stderr** in a compact form (`HH:MM:SS LEVEL module:message`). On a TTY, only the level word (**INFO**, **WARNING**, **ERROR**, **CRITICAL**) is colored (unless `NO_COLOR` is set). Per-object metadata progress is **DEBUG** only; **INFO** summarizes each metadata pass and sheet step.
 
 ---
 
@@ -78,6 +86,13 @@ Example: `cp progenitors/scripts/set_env_example.sh my_env.sh`, edit, then `sour
 
 ## Usage
 
+**Google Sheets pipeline — entry point:** After install, the console script runs `progenitors.__main__:main`, which parses CLI flags in `progenitors.options` and calls `progenitors.pipeline.main` (download sheet → merge YSE → fetch metadata → optional reclassification → upload). Equivalent invocations:
+
+```bash
+python -m progenitors
+progenitors
+```
+
 **Pipeline:** Set env vars and `credentials.json`, then:
 
 ```bash
@@ -85,6 +100,16 @@ progenitors
 progenitors --redo --metadata ned,distance,tns,yse,ads,hst
 progenitors --update-classification --alert
 ```
+
+Refresh TNS object/classification metadata, re-sort sheets by classification, trim stale metadata keys, and email on new candidates (similar to legacy `progenitors.py --update-tns-class --update-classification --trim-metadata --alert`):
+
+```bash
+progenitors --update-tns-class --update-classification --trim-metadata --alert
+```
+
+(`--update-tns-class` ensures `tns` is included in the metadata types for this run; the default metadata set already includes `tns`, so this flag matters most when you pass a custom `--metadata` list that omitted it.)
+
+**Local metadata cache:** zstd-compressed pickle (`.pkl.zst`) under [`progenitors/metadata/`](progenitors/metadata/README.md) by default, or `PROGENITORS_METADATA_DIR` if set; legacy `.pkl` is still read until a save migrates it. Gitignored.
 
 **Python (sheets and metadata):**
 
@@ -119,7 +144,7 @@ Details, citation, and data layout: [progenitors/davies18/README.md](progenitors
 **Examples:** From repo root, run scripts under `examples/` (package must be installed). Full list and descriptions: [examples/README.md](examples/README.md).
 
 ```bash
-python examples/example_util.py
+python examples/example_extinction.py
 # or run all:
 for f in examples/example_*.py; do python "$f" || exit 1; done
 ```
