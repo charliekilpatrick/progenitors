@@ -34,6 +34,116 @@ def truncate(n, decimals=0):
     multiplier = 10 ** decimals
     return int(n * multiplier) / multiplier
 
+
+def _sed_figures_dir():
+    """Return the package figures directory (progenitors/sed/figures/)."""
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), 'figures') + os.sep
+
+
+def _sed_data_dir():
+    """Return the package data directory (progenitors/sed/data/)."""
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data') + os.sep
+
+
+def load_progenitors_table(pfile):
+    """
+    Load progenitor catalog in progenitors.dat format.
+
+    Expected columns: name, type, log_T, e_log_T, log_L, e_log_L (no header in file).
+    Normalizes II-P and II-L to type 'II'.
+
+    Parameters
+    ----------
+    pfile : str
+        Path to the ASCII file (e.g. progenitors.dat).
+
+    Returns
+    -------
+    astropy.table.Table
+        Table with name, type, log_T, e_log_T, log_L, e_log_L.
+    """
+    header = ('name', 'type', 'log_T', 'e_log_T', 'log_L', 'e_log_L')
+    data = Table.read(pfile, names=header, format='ascii')
+    for i, row in enumerate(data):
+        if row['type'] == 'II-P' or row['type'] == 'II-L':
+            data[i]['type'] = 'II'
+    return data
+
+
+def plot_hr_from_progenitors(progenitors_file=None, outpath=None, figsize=None):
+    """
+    Plot an HR diagram (log T_eff vs log L) from progenitors.dat and save to sed/figures/.
+
+    Data are read from the package data file progenitors.dat unless another path
+    is given. The figure is saved to the package figures directory.
+
+    Parameters
+    ----------
+    progenitors_file : str, optional
+        Path to the progenitor catalog. Default: progenitors/sed/data/progenitors.dat.
+    outpath : str, optional
+        Full path for the output figure. Default: progenitors/sed/figures/progenitors_hr.png.
+    figsize : tuple, optional
+        (width, height) in inches. Default: (8, 6).
+    """
+    if progenitors_file is None:
+        progenitors_file = _sed_data_dir() + 'progenitors.dat'
+    if not os.path.exists(progenitors_file):
+        raise FileNotFoundError('Progenitor catalog not found: {}'.format(progenitors_file))
+
+    if outpath is None:
+        figdir = _sed_figures_dir()
+        os.makedirs(figdir, exist_ok=True)
+        outpath = os.path.join(figdir, 'progenitors_hr.png')
+    else:
+        os.makedirs(os.path.dirname(os.path.abspath(outpath)) or '.', exist_ok=True)
+
+    if figsize is None:
+        figsize = (8, 6)
+
+    prog = load_progenitors_table(progenitors_file)
+
+    plot_types = [
+        {'type': ['II'], 'color': red, 'marker': 's', 'name': 'SN II'},
+        {'type': ['IIb'], 'color': green, 'marker': 'o', 'name': 'SN IIb'},
+        {'type': ['Ib', 'Ic'], 'color': blue, 'marker': 'D', 'name': 'SN Ib/c'},
+        {'type': ['IIn'], 'color': magenta, 'marker': '^', 'name': 'SN IIn'},
+        {'type': ['II-s'], 'color': orange, 'marker': 'v', 'name': 'SN II-s'},
+    ]
+
+    fig, ax = plt.subplots(figsize=figsize)
+    ax.set_xlabel(r'$\log(T_{\mathrm{eff}}/\mathrm{K})$')
+    ax.set_ylabel(r'$\log(L/L_{\odot})$')
+    ax.invert_xaxis()
+
+    for ptype in plot_types:
+        ax.errorbar([], [], marker=ptype['marker'], ms=8, color=ptype['color'],
+                    linewidth=0.8, markeredgecolor=black, markeredgewidth=0.5,
+                    label=ptype['name'], capsize=2)
+
+    for ptype in plot_types:
+        for row in prog:
+            if row['type'] in ptype['type']:
+                if row['e_log_L'] == 0.0:
+                    uplims = [1]
+                    lum_err = 0.1
+                else:
+                    uplims = [0]
+                    lum_err = row['e_log_L']
+                ax.errorbar([row['log_T']], [row['log_L']],
+                            xerr=[row['e_log_T']], yerr=[lum_err],
+                            uplims=uplims, color=ptype['color'],
+                            linewidth=0.8, marker=ptype['marker'], ms=8,
+                            capsize=2, markeredgecolor=black, markeredgewidth=0.5)
+
+    ax.legend(loc='lower left', fontsize=9)
+    ax.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(outpath, format='png', dpi=150)
+    plt.close()
+    return outpath
+
+
 class sed_plot(object):
     def __init__(self):
 
@@ -812,7 +922,7 @@ class sed_plot(object):
 
         outfile = self.options.objname.strip() + '_hr-{0}.eps'
         outfile = outfile.format(mode[0])
-        outfile = os.path.join(self.outdir, outfile)
+        outfile = os.path.join(self.fit.dirs['figures'], outfile)
 
         self.close_plot(outfile)
 
