@@ -1075,17 +1075,31 @@ def get_host_distance(row, table=None):
 
     if r.status_code==200:
         try:
-            df = pandas.read_html(r.content)
-        except ValueError:
-            pass
+            # Passing raw bytes/str makes some pandas+lxml versions treat HTML as a
+            # file path ("open this URL"), which raises OSError. Use a file object.
+            df = pandas.read_html(io.StringIO(r.text))
+        except Exception as exc:
+            logger.warning(
+                "ned distance: HTML parse failed for %s (host=%s): %s",
+                row['Name'],
+                name_fmt,
+                exc,
+            )
+            df = []
 
     if len(df)>1:
-        table = Table.from_pandas(df[1])
-        return({'table': table})
-    else:
-        return({'table': None})
-
-    return({})
+        try:
+            at = Table.from_pandas(df[1])
+            return({'table': at})
+        except Exception as exc:
+            logger.warning(
+                "ned distance: could not build table for %s (host=%s): %s",
+                row['Name'],
+                name_fmt,
+                exc,
+            )
+            return({'table': None})
+    return({'table': None})
 
 def get_best_distance(row, table=None):
 
@@ -1692,6 +1706,63 @@ get_data = {'OSC': get_osc,
             'Ref. (Classification)': get_type_ref,
             'Classification': get_classification,}
 
+_MAST_ENRICH_COLS = frozenset({
+    'instrument_name',
+    'ra',
+    'dec',
+    'exptime',
+    'filter',
+    'start_time',
+    'downloadFilename',
+})
+
+
+def _mast_strip_enrich_collisions(product_table):
+    """Remove product-table columns that share names with observation-derived columns."""
+    for name in list(product_table.colnames):
+        if name in _MAST_ENRICH_COLS:
+            product_table.remove_column(name)
+
+
+def _mast_row_numeric_coords(prod):
+    """Require numeric sky coords and exposure time after enrichment (catch schema drift)."""
+    try:
+        float(prod['ra'])
+        float(prod['dec'])
+        float(prod['exptime'])
+        return True
+    except (TypeError, ValueError, KeyError):
+        return False
+
+
+def _mast_vstack_append(productlist, row_tables, obstype_label):
+    """Vertically stack single-row tables onto productlist; skip bad chunks."""
+    if not row_tables:
+        return productlist
+    try:
+        new_chunk = vstack(row_tables, join_type='outer')
+    except Exception as exc:
+        logger.warning(
+            "mast %s: skipping %d product row(s); in-observation stack failed (%s)",
+            obstype_label,
+            len(row_tables),
+            exc,
+        )
+        return productlist
+    try:
+        if productlist is None or len(productlist) == 0:
+            return new_chunk
+        return vstack([productlist, new_chunk], join_type='outer')
+    except Exception as exc:
+        logger.warning(
+            "mast %s: skipping %d product row(s); merge with existing products failed (%s)",
+            obstype_label,
+            len(new_chunk),
+            exc,
+        )
+        return productlist
+
+
 def get_productlist(coord, search_radius, obstype='HST',
     insts=['ACS','WFC','WFPC2'], table=None):
 
@@ -1738,6 +1809,7 @@ def get_productlist(coord, search_radius, obstype='HST',
     # Iterate through each observation and download the correct product
     # depending on the filename and instrument/detector of the observation
     for obs in obsTable:
+        use_cached_products = False
         # First check if we've already queried for these data, can skip those
         if (table is not None and obstype.lower() in table.meta.keys() and
             table.meta[obstype.lower()] is not None):
@@ -1745,11 +1817,22 @@ def get_productlist(coord, search_radius, obstype='HST',
             # key by start time
             mask = obstype_table['start_time']==obs['t_min']
             if len(obstype_table[mask])>0:
-                if not productlist:
-                    productlist = obstype_table[mask]
-                else:
-                    productlist = vstack([productlist, obstype_table[mask]])
-                continue
+                cached_slice = obstype_table[mask]
+                try:
+                    if not productlist:
+                        productlist = cached_slice
+                    else:
+                        productlist = vstack([productlist, cached_slice],
+                                             join_type='outer')
+                    use_cached_products = True
+                except Exception as exc:
+                    logger.warning(
+                        "mast %s: cached products failed to merge; refetching (%s)",
+                        obstype.lower(),
+                        exc,
+                    )
+        if use_cached_products:
+            continue
         try:
             productList = Observations.get_product_list(obs)
             # Ignore the 'C' type products
@@ -1761,6 +1844,8 @@ def get_productlist(coord, search_radius, obstype='HST',
             error += 'Try again later...'
             logger.warning("mast: get_product_list failed; %s", error.replace('\n', ' '))
             return(productlist)
+
+        _mast_strip_enrich_collisions(productList)
 
         instrument = obs['instrument_name']
         s_ra = obs['s_ra']
@@ -1794,6 +1879,7 @@ def get_productlist(coord, search_radius, obstype='HST',
         dlfilenamecol = Column(downloadFilenames, name='downloadFilename')
         productList.add_column(dlfilenamecol)
 
+        row_tables = []
         for prod in productList:
             filename = prod['productFilename']
 
@@ -1806,32 +1892,32 @@ def get_productlist(coord, search_radius, obstype='HST',
                     ('flt.fits' in filename and 'ACS/HRC' in instrument) or
                     ('flc.fits' in filename and 'WFC3/UVIS' in instrument) or
                     ('flt.fits' in filename and 'WFC3/IR' in instrument)):
-
-                    if not productlist or len(productlist)==0:
-                        productlist = Table(prod)
-                    else:
-                        try:
-                            productlist.add_row(prod)
-                        except ValueError:
-                            logger.error("mast HST row mismatch prod=%s table_cols=%s",
-                                         prod, list(productlist.colnames) if productlist is not None else None)
-                            raise Exception('Mismatch between row and table!')
+                    if not _mast_row_numeric_coords(prod):
+                        logger.warning(
+                            "mast HST: skipping product %r; non-numeric coordinates/exptime",
+                            filename,
+                        )
+                        continue
+                    row_tables.append(Table(prod))
 
             elif obstype=='JWST':
-                if prod['productType']!='SCIENCE': continue
-                if 'i2d.fits' not in prod['productFilename']: continue
-                if prod['calib_level']!=3: continue
-                if prod['type']!='D': continue
+                if prod['productType']!='SCIENCE':
+                    continue
+                if 'i2d.fits' not in prod['productFilename']:
+                    continue
+                if prod['calib_level']!=3:
+                    continue
+                if prod['type']!='D':
+                    continue
+                if not _mast_row_numeric_coords(prod):
+                    logger.warning(
+                        "mast JWST: skipping product %r; non-numeric coordinates/exptime",
+                        prod['productFilename'],
+                    )
+                    continue
+                row_tables.append(Table(prod))
 
-                if not productlist:
-                    productlist = Table(prod)
-                else:
-                    try:
-                        productlist.add_row(prod)
-                    except ValueError:
-                        logger.error("mast JWST row mismatch prod=%s table_cols=%s",
-                                     prod, list(productlist.colnames) if productlist is not None else None)
-                        raise Exception('Mismatch between row and table!')
+        productlist = _mast_vstack_append(productlist, row_tables, obstype.lower())
 
     if not productlist:
         return(productlist)
@@ -1841,14 +1927,21 @@ def get_productlist(coord, search_radius, obstype='HST',
         productlist = unique(productlist, keys='downloadFilename')
 
     # If the table was passed, add these to metadata
-    if table.meta[obstype.lower()] is None:
-        table.meta[obstype.lower()]=productlist
-    else:
-        # Take vstack and make sure all entries are unique
-        table.meta[obstype.lower()]=vstack([table.meta[obstype.lower()],
-            productlist])
-        table.meta[obstype.lower()] = unique(table.meta[obstype.lower()],
-            keys='downloadFilename')
+    if table is not None:
+        try:
+            if table.meta[obstype.lower()] is None:
+                table.meta[obstype.lower()]=productlist
+            else:
+                table.meta[obstype.lower()]=vstack([table.meta[obstype.lower()],
+                    productlist], join_type='outer')
+                table.meta[obstype.lower()] = unique(table.meta[obstype.lower()],
+                    keys='downloadFilename')
+        except Exception as exc:
+            logger.warning(
+                "mast %s: could not merge product list into sheet metadata; leaving cached meta unchanged (%s)",
+                obstype.lower(),
+                exc,
+            )
 
     # Sort by obsID in case we need to reference
     productlist.sort('obsID')
