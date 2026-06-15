@@ -82,7 +82,7 @@ def plot_hr_from_progenitors(progenitors_file=None, outpath=None, figsize=None):
     progenitors_file : str, optional
         Path to the progenitor catalog. Default: progenitors/sed/data/progenitors.dat.
     outpath : str, optional
-        Full path for the output figure. Default: progenitors/sed/figures/progenitors_hr.png.
+        Full path for the output figure. Default: progenitors/sed/figures/progenitors_hr.eps.
     figsize : tuple, optional
         (width, height) in inches. Default: (8, 6).
     """
@@ -94,7 +94,7 @@ def plot_hr_from_progenitors(progenitors_file=None, outpath=None, figsize=None):
     if outpath is None:
         figdir = _sed_figures_dir()
         os.makedirs(figdir, exist_ok=True)
-        outpath = os.path.join(figdir, 'progenitors_hr.png')
+        outpath = os.path.join(figdir, "progenitors_hr.eps")
     else:
         os.makedirs(os.path.dirname(os.path.abspath(outpath)) or '.', exist_ok=True)
 
@@ -139,7 +139,11 @@ def plot_hr_from_progenitors(progenitors_file=None, outpath=None, figsize=None):
     ax.legend(loc='lower left', fontsize=9)
     ax.grid(True, alpha=0.3)
     plt.tight_layout()
-    plt.savefig(outpath, format='png', dpi=150)
+    ext = os.path.splitext(outpath)[1].lower()
+    if ext == ".eps":
+        plt.savefig(outpath, format="eps", bbox_inches="tight", pad_inches=0.02)
+    else:
+        plt.savefig(outpath, format="png", dpi=150)
     plt.close()
     return outpath
 
