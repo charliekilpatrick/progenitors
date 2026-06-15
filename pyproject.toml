@@ -16,6 +16,8 @@ dependencies = [
     "zstandard>=0.22",
     "astroquery",
     "dustmaps",
+    "emcee",
+    "extinction",
     "google-api-python-client",
     "google-auth-oauthlib",
     "google-auth-httplib2",
@@ -38,7 +40,6 @@ sed_hst = [
     "stsynphot",
 ]
 sed_fit = [
-    "emcee",
     "dynesty",
 ]
 

@@ -1,0 +1,30 @@
+# %ECSV 0.9
+# ---
+# datatype:
+# - {name: MJD, datatype: string}
+# - {name: Instrument, datatype: string}
+# - {name: Filter, datatype: string}
+# - {name: Exposure, datatype: float64}
+# - {name: Magnitude, datatype: float64}
+# - {name: Uncertainty, datatype: float64}
+# - {name: Use, datatype: uint8}
+# meta: !!omap
+# - {name: 2026dix }
+# - {ra: 177.65590 }
+# - {dec: 55.35358 }
+# - {distance: 16.98 }
+# - {dist_error: 3.13 }
+# - {host_ebv: 0.00 }
+# - {host_ebv_error: 0.00 }
+# - {host_rv: 3.1 }
+# - {redshift: 0.003185 }
+# - {magsystem: ab }
+# - {host_galaxy: NGC3913 }
+# - {discovery_date: 2026-02-15T09:19:29.000 }
+# schema: astropy-2.0
+MJD       Instrument  Filter  Exposure Magnitude Uncertainty Use
+60334.143 WFC3/UVIS   F336W    360.0 26.23 0.000 1
+52184.107 WFPC2       F450W    460.0 24.72 0.000 1
+52184.107 WFPC2       F606W    460.0 25.03 0.230 1
+60334.143 WFC3/UVIS   F625W    360.0 25.31 0.130 1
+51926.547 WFPC2       F814W    640.0 25.03 0.250 1

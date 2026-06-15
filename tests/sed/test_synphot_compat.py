@@ -12,6 +12,16 @@ def test_setref():
     from progenitors.sed import synphot_compat as S
     S.setref()
     S.setref(area=25.0)
+    S.setref(area=25.0 * 10000, waveset=(100, 2.5e5, 50000, "log"))
+
+
+def test_array_spectrum_count_uses_photlam():
+    """Legacy fluxunits='count' builds a spectrum (synphot rejects dimensionless)."""
+    from progenitors.sed.synphot_compat import ArraySpectrum
+    wave = np.linspace(4000, 7000, 50)
+    tr = np.ones(50) * 0.9
+    sp = ArraySpectrum(wave, tr, fluxunits='count')
+    assert sp.flux is not None and len(sp.flux) == 50
 
 
 def test_array_spectrum_basic():

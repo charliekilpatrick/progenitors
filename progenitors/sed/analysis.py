@@ -6,6 +6,18 @@ and red supergiant models (Kilpatrick & Foley 2018). Supports MCMC (emcee)
 and nested sampling (dynesty). Model fit parameter names are in
 progenitors.settings.sed_analysis.MODEL_FIT_PARAMS.
 """
+import sys
+from pathlib import Path
+
+# ``python progenitors/sed/analysis.py ...`` loads this file as __main__, so relative
+# imports need the repo root on sys.path and an explicit package name.
+if __name__ == "__main__" and __package__ is None:
+    _repo_root = Path(__file__).resolve().parents[2]
+    _repo_root_s = str(_repo_root)
+    if _repo_root_s not in sys.path:
+        sys.path.insert(0, _repo_root_s)
+    __package__ = "progenitors.sed"
+
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -15,6 +27,7 @@ from astropy.coordinates import SkyCoord
 from astropy.table import vstack, Column, Table
 
 from scipy import integrate, interpolate
+from scipy.interpolate import RegularGridInterpolator, SmoothBivariateSpline
 
 import emcee
 try:
@@ -24,7 +37,6 @@ except ImportError:
     dynesty = None
     _HAS_DYNESTY = False
 import os
-import sys
 import math
 import glob
 import pickle
@@ -41,6 +53,44 @@ from . import constants
 from . import utilities
 from . import dust
 from progenitors.settings.sed_analysis import MODEL_FIT_PARAMS
+
+
+def _interp2d_mag_grid_to_rgi(model):
+    """
+    Upgrade legacy scipy.interp2d (unpickled blackbody grids) to
+    RegularGridInterpolator (SciPy >= 1.14 removed callable interp2d).
+    """
+    if isinstance(model, RegularGridInterpolator):
+        return model
+    if type(model).__name__ != "interp2d":
+        return model
+    if not all(hasattr(model, a) for a in ("x", "y", "z")):
+        return model
+    x = np.asarray(model.x, dtype=np.float64).ravel()
+    y = np.asarray(model.y, dtype=np.float64).ravel()
+    ny, nx = len(y), len(x)
+    z = np.asarray(model.z, dtype=np.float64)
+    if z.size == nx * ny:
+        z = z.reshape(ny, nx)
+    be = getattr(model, "bounds_error", True)
+    return RegularGridInterpolator((x, y), z.T, method="cubic", bounds_error=be)
+
+
+def _eval_lum_logt_mag_interp(model, lum, logt):
+    """Scalar mag from (log L, log T_eff) grid: RGI, SmoothBivariateSpline, or interp2d."""
+    if isinstance(model, RegularGridInterpolator):
+        return float(model(np.array([[lum, logt]], dtype=np.float64))[0])
+    if isinstance(model, SmoothBivariateSpline):
+        return float(model(lum, logt).item())
+    try:
+        v = model(lum, logt)
+        return float(np.asarray(v).squeeze().item())
+    except TypeError:
+        upgraded = _interp2d_mag_grid_to_rgi(model)
+        if upgraded is not model:
+            return float(upgraded(np.array([[lum, logt]], dtype=np.float64))[0])
+        raise
+
 
 from . import synphot_compat as S
 S.setref(area=25.0 * 10000)
@@ -424,7 +474,9 @@ class sed_fitter(object):
 
         elam = 10**(-0.4 * a_wave)
 
-        sp = S.ArraySpectrum(wave, elam, fluxunits='count')
+        # Multiplicative transmission; use PHOTLAM so synphot accepts the
+        # empirical spectrum (same convention as calculate_extinction).
+        sp = S.ArraySpectrum(wave, elam, fluxunits='photlam')
 
         return(sp)
 
@@ -576,6 +628,8 @@ class sed_fitter(object):
         bbfile = self.dirs['data']+self.files['blackbody']['interp']
         if os.path.exists(bbfile):
             models = pickle.load(open(bbfile, 'rb'))
+            for _k in list(models.keys()):
+                models[_k] = _interp2d_mag_grid_to_rgi(models[_k])
             # Remove inst_filt pairs that we don't need to calculate
             for key in models.keys():
                 if key in inst_filt:
@@ -605,8 +659,12 @@ class sed_fitter(object):
         bar.finish()
 
         for val in inst_filt:
-            models[val] = interpolate.interp2d(Lval, logTval, mags[val],
-                kind='cubic', bounds_error=True)
+            models[val] = RegularGridInterpolator(
+                (Lval, logTval),
+                mags[val].T,
+                method="cubic",
+                bounds_error=True,
+            )
 
         # Save models back to pickle file
         pickle.dump(models, open(bbfile, 'wb'))
@@ -1020,7 +1078,8 @@ class sed_fitter(object):
                 lum, temp, _ = args
             else:
                 lum, temp = args
-            mags = np.array([self.models[i](lum, np.log10(temp)).item()
+            mags = np.array([
+                _eval_lum_logt_mag_interp(self.models[i], lum, np.log10(temp))
                 for i in inst_filt])
         elif 'rsg' in self.model_type:
             if self.options.use_variance:
@@ -2079,8 +2138,10 @@ class sed_fitter(object):
         test = self.extinction_law(self.waves, Av, Rv)
         flat = np.zeros(len(self.waves))+1.0
 
-        test1 = S.ArraySpectrum(self.waves, flat)
-        test2 = S.ArraySpectrum(self.waves, flat*test.flux)
+        # Same flux unit as extinction_law (photlam): band extinction is
+        # Delta m between uniform and transmitted spectra in that unit.
+        test1 = S.ArraySpectrum(self.waves, flat, fluxunits='photlam')
+        test2 = S.ArraySpectrum(self.waves, flat * test.flux, fluxunits='photlam')
 
         kwargs = {'force': 'taper', 'binset': self.waves}
 

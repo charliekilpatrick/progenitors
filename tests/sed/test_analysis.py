@@ -124,6 +124,20 @@ def test_extinction_law_ccm89():
     assert sp.flux is not None and len(sp.flux) == 50
 
 
+def test_eval_lum_logt_mag_interp_regular_grid():
+    """_eval_lum_logt_mag_interp matches RegularGridInterpolator on a toy grid."""
+    from scipy.interpolate import RegularGridInterpolator
+    from progenitors.sed import analysis as A
+    L = np.linspace(0.0, 1.0, 7)
+    logT = np.linspace(2.0, 3.0, 8)
+    ll, tt = np.meshgrid(L, logT, indexing="ij")
+    z = ll + tt
+    rgi = RegularGridInterpolator((L, logT), z, method="linear", bounds_error=True)
+    lum, lt = 0.37, 2.41
+    expect = lum + lt
+    assert abs(A._eval_lum_logt_mag_interp(rgi, lum, lt) - expect) < 1e-10
+
+
 def test_create_blackbody():
     """create_blackbody returns spectrum with .wave and .flux."""
     fit = _get_fitter()

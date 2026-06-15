@@ -8,7 +8,16 @@ are read from data/dust/ (wavelength, opacity, RSG grids).
 from astropy.io import ascii
 import numpy as np
 from scipy import interpolate
-from scipy.integrate import simps
+
+try:
+    from scipy.integrate import simps
+except ImportError:
+    from scipy.integrate import simpson
+
+    def simps(y, x=None, dx=1.0, axis=-1):
+        if x is not None:
+            return simpson(y, x=x, axis=axis)
+        return simpson(y, dx=dx, axis=axis)
 from . import synphot_compat as S
 import os
 import sys
@@ -53,20 +62,45 @@ def rebin(a, newshape):
     return newarray
 
 wavelength = rebin(wavelength, 7748)
-rsg_10 = interpolate.interp2d(wavelength, temp, data10)
-#rsg_05 = interpolate.interp2d(wavelength, temp[:data05.shape[0]], data05)
-#rsg_0_5 = interpolate.interp2d(wavelength, temp[:data0_5.shape[0]], data0_5)
-#rsg_00 = interpolate.interp2d(wavelength, temp[:data00.shape[0]], data00)
+# SciPy >= 1.14 removed interp2d; RegularGridInterpolator matches (temp, λ) grid.
+_rsg_10_rgi = interpolate.RegularGridInterpolator(
+    (temp, wavelength),
+    data10,
+    bounds_error=False,
+    fill_value=None,
+    method="linear",
+)
+
+
+def _rsg_10_interp(wave, teff):
+    """RSG model flux on grid `wave` (Å) at stellar temperature `teff` (K)."""
+    wave = np.asarray(wave, dtype=np.float64)
+    teff = float(teff)
+    pts = np.column_stack(
+        (np.full(wave.shape[0], teff, dtype=np.float64), wave),
+    )
+    return _rsg_10_rgi(pts)
+
+
+# rsg_10 kept as alias for any external references
+rsg_10 = _rsg_10_interp
+# rsg_05 / rsg_0_5 / rsg_00 were interp2d-based; only model '10' is loaded.
 
 # kappa_V, the opacity in V-band calculated from dust01_trans.dat
-bp = S.ObsBandpass('johnson,V')
-sp1 = S.ArraySpectrum(wavelength, kappa, 
-    fluxunits='counts', waveunits='angstrom')
-sp2 = S.ArraySpectrum(wavelength, np.array([1.0]*len(wavelength)), 
-    fluxunits='counts', waveunits='angstrom')
+# ``johnson_v`` is built into synphot; ``johnson,V`` often needs stsynphot.
+# PHOTLAM spectra work with modern synphot (dimensionless ``counts`` does not).
+bp = S.ObsBandpass('johnson_v')
+sp1 = S.ArraySpectrum(
+    wavelength, kappa, fluxunits='photlam', waveunits='angstrom'
+)
+sp2 = S.ArraySpectrum(
+    wavelength, np.array([1.0] * len(wavelength)),
+    fluxunits='photlam',
+    waveunits='angstrom',
+)
 obs1 = S.Observation(sp1, bp, binset=wavelength)
 obs2 = S.Observation(sp2, bp, binset=wavelength)
-kappa_V=obs1.effstim('counts')/obs2.effstim('counts')
+kappa_V = obs1.effstim('photlam') / obs2.effstim('photlam')
 
 # Normalize kappa for calculation below so we can derive correct luminosity
 kappa = kappa/np.max(kappa)
@@ -153,7 +187,7 @@ def get_dust(x, p, model='g2'):
 
 def get_rsg(scale, temp, model='10'):
     """RSG spectrum in flam (erg/s/cm2/AA), scaled to luminosity `scale` (Lsun) at temperature `temp` (K). Only model='10' is loaded."""
-    if model=='10': flux=rsg_10(wavelength, temp)
+    if model=='10': flux=_rsg_10_interp(wavelength, temp)
     elif model=='05': flux=rsg_05(wavelength, temp)
     elif model=='0_5': flux=rsg_0_5(wavelength, temp)
     elif model=='00': flux=rsg_00(wavelength, temp)

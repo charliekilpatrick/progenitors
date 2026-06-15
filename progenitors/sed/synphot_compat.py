@@ -23,17 +23,20 @@ except ImportError:
     _HAS_STSYN = False
 
 
-def setref(area=None):
+def setref(area=None, **kwargs):
     """
-    No-op for compatibility with legacy code.
+    No-op for compatibility with legacy pysynphot ``refs.setref``.
 
-    synphot passes area to countrate() when needed; not used for magnitude
-    calculations.
+    Legacy callers pass ``area``, ``waveset=(min, max, n, 'log'|linear)``, etc.
+    Modern synphot uses explicit wavelength grids per spectrum/observation;
+    these arguments are ignored.
 
     Parameters
     ----------
     area : float, optional
         Telescope area (ignored).
+    **kwargs
+        e.g. ``waveset`` from ``sed_fitter.import_phottable`` (ignored).
     """
     pass
 
@@ -140,8 +143,11 @@ def ArraySpectrum(wave, flux, waveunits='angstrom', fluxunits='flam', name=''):
     waveunits : str, optional
         Wavelength unit (e.g. 'angstrom', 'nm'). Default is 'angstrom'.
     fluxunits : str, optional
-        Flux unit: 'flam', 'fnu', 'count'/'counts', or astropy unit string.
-        Default is 'flam'.
+        Flux unit: ``flam``, ``fnu``, ``photlam``, or ``count``/``counts``.
+        ``count``/``counts`` are treated as ``PHOTLAM`` (dimensionless
+        multipliers such as transmission ``10^{-0.4 A_\lambda}`` use the same
+        numeric values with a photometric flux unit synphot accepts).
+        Default is ``flam``.
     name : str, optional
         Label for the spectrum.
 
@@ -160,9 +166,16 @@ def ArraySpectrum(wave, flux, waveunits='angstrom', fluxunits='flam', name=''):
         flux_u = flux * (u.erg / u.s / u.cm**2 / u.AA)
     elif fluxunits == 'fnu':
         flux_u = flux * (u.erg / u.s / u.cm**2 / u.Hz)
-    elif fluxunits == 'count' or fluxunits == 'counts':
-        # Dimensionless (e.g. extinction curve) or PHOTLAM
-        flux_u = flux * u.dimensionless_unscaled
+    elif (
+        fluxunits == 'count'
+        or fluxunits == 'counts'
+        or str(fluxunits).lower() == 'photlam'
+    ):
+        try:
+            from synphot.units import PHOTLAM as _PHOTLAM
+        except ImportError:
+            _PHOTLAM = u.Unit('PHOTLAM')
+        flux_u = flux * _PHOTLAM
     else:
         flux_u = flux * u.Unit(fluxunits)
     sp = SourceSpectrum(Empirical1D, points=wave_u, lookup_table=flux_u)
@@ -194,9 +207,13 @@ def _unwrap_spectrum(sp):
 
 
 def _taper_bp(bp):
-    if hasattr(bp, 'taper'):
+    """Taper bandpass edges when supported (synphot); stsynphot may disable ``taper()``."""
+    if not hasattr(bp, 'taper'):
+        return bp
+    try:
         return bp.taper()
-    return bp
+    except NotImplementedError:
+        return bp
 
 
 class _ObservationWrapper:
